@@ -1,53 +1,51 @@
-# Unnamed ITSM project
+# Unnamed ITSM project — pre-alpha
 
-Development workspace for an unnamed project evolving from asset management (ITAM) toward service management (ITSM). The frontend is pre-alpha; the backend stack has not been selected. “Asset Manager” is the inherited UI label, not a final project name.
+Modular-monolith foundation for small IT teams. The project has no approved product name; “Asset Manager” is the frontend's inherited demo label. Phase 1 implements backend infrastructure, not complete inventory, production authentication or conversational agents.
 
-## Layout
+## Components
 
-```text
-asset/                 # coordination Git repository
-├── AGENTS.md          # shared development rules
-├── VERSION            # independent unreleased release version: 0.0.0
-├── odd/tasks/         # cross-component ODD work
-├── frontend/          # independent Git; preserved frontend history
-│   ├── AGENTS.md      # frontend-specific context
-│   ├── package.json   # internal frontend version 0.1.0, pre-alpha
-│   └── README.md      # detailed frontend commands/demo boundaries
-└── backend/           # independent Git; no code or stack yet
-    ├── AGENTS.md
-    └── README.md
-```
+Three independent Git repositories live here; root Git ignores the two components. Clone/back up each independently. No submodules or release pipeline are implied.
 
-Root Git deliberately ignores both component repositories. **Cloning or backing up root alone does not include either component.** Each repository must be committed/backed up independently; no remotes, submodules or deployment are configured by this preparation.
+| Path | Scope | Internal version |
+|---|---|---|
+| `frontend/` | Existing React 19/TypeScript host and Vue 3 domain views; now packaged with non-root Nginx | `0.1.0`, pre-alpha |
+| `backend/` | FastAPI/Pydantic v2, SQLAlchemy 2/Alembic, Huey task adapter/worker | `0.1.0`, pre-alpha |
+| root | Compose, architecture/operations docs and cross-component ODD | release `VERSION=0.0.0`, unreleased |
 
-## Run the existing frontend
+[Architecture amendment](docs/phase-0-amendment-01.md) records selected technologies and deferred adapters. [Operations](docs/operations.md) covers configuration, installation, updates, migration, backup and recovery. [Backend](backend/README.md) describes API/worker/native commands; [frontend](frontend/README.md) retains UI/demo boundaries.
 
-From `asset/`:
+## Start locally
+
+Requires Docker Engine + Compose. Supply `ITSM_POSTGRES_PASSWORD` through your external environment; no `.env` file is created or read by these commands.
 
 ```bash
-cd frontend
-npm ci                 # only if dependencies are not installed
-npm run dev            # http://127.0.0.1:5173
+docker compose --env-file /dev/null --profile local-postgres up -d --wait postgres
+docker compose --env-file /dev/null build backend frontend
+docker compose --env-file /dev/null run --rm migrate
+docker compose --env-file /dev/null up -d --wait backend worker frontend
 ```
 
-Verification and local production preview:
+- Frontend: `http://127.0.0.1:18080` (existing demo, not newly connected business modules).
+- API/OpenAPI: `http://127.0.0.1:18000/docs`.
+- API health: `/api/v1/health/live` and `/api/v1/health/ready`.
+- Worker: separate process, same backend image, shared persistent local queue volume. Default SQLite queue requires no Redis.
+- Local PostgreSQL is optional: set `ITSM_DATABASE_URL` for external SQL and omit its profile. For local persistent SQLite main data use `sqlite:////data/app/itsm.db`; queue is a different file/volume.
+
+Profiles `redis`, `search` and `monitoring` opt into Redis, Meilisearch and Prometheus. None is required to start the base stack. Prometheus retains metrics with configurable retention; an external instance can be used instead. Device exporters, advanced search and business notification/PDF/auth/agent integrations are later phases.
+
+## Verify
 
 ```bash
+docker compose --env-file /dev/null config --quiet
 npm --prefix frontend run check
-npm --prefix frontend run build
-npm --prefix frontend run preview -- --port 4173
+# Backend environment and test commands: backend/README.md
+curl --fail http://127.0.0.1:18000/api/v1/health/ready
 ```
 
-The UI currently uses a React 19/TypeScript/Vite host around extensive Vue 3 domain views. It is not a full React rewrite. Authentication, monitoring and integrations remain client-side demo behavior. See [frontend/README.md](frontend/README.md).
+Frontend-only development remains available with `npm --prefix frontend run dev`, and production preview with `npm --prefix frontend run build && npm --prefix frontend run preview -- --port 4173`.
 
-## Versions and workflow
+See `odd/tasks/phase-1.md` for observed command exits and the tested SQL/queue matrix. Planned engine support is not the same as a verified live server. No production deployment, push, tag or release is performed by local verification.
 
-- Root `VERSION`: release `0.0.0` (unreleased foundation).
-- Frontend: internal `0.1.0`, pre-alpha, unchanged by this relocation.
-- Backend: internal version and stack not assigned yet.
+## Development rules
 
-Use related, verified commits in the correct repository. Branch only when a functional base needs a meaningful experiment or a separate version line; parallel writers require separate component worktrees. Read [AGENTS.md](AGENTS.md) and the relevant nested instructions. Follow ODD and load all relevant skills for both parent and subagents. Keep solutions simple.
-
-## Next boundary
-
-Define backend requirements and stack with the human before creating application code, dependency manifests, API contracts or database configuration. There is no backend startup command yet.
+Follow [AGENTS.md](AGENTS.md) plus the component instructions: ODD, all relevant skills for parent/subagents, simple solutions, related Conventional Commits, independent versions, and different worktrees for simultaneous code-writing subagents. No slogans, invented product claims or speculative infrastructure. Secrets stay outside Git and logs. Docker verification must use isolated project names, ports and volumes rather than modifying existing server stacks.

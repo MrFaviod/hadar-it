@@ -5,3 +5,7 @@
 /.codegraph/
 /.verification/
 *.local
+.env
+.env.*
+__pycache__/
+*.py[cod]
