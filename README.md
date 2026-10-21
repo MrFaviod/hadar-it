@@ -1,6 +1,6 @@
 # Unnamed ITSM project — pre-alpha
 
-Modular-monolith foundation for small IT teams. The project has no approved product name; “Asset Manager” is the frontend's inherited demo label. Phase 1 supplies infrastructure; Phase 2 adds real identity, sessions and service-level Casbin authorization. Inventory domain APIs and conversational agents remain future work.
+Modular-monolith foundation for small IT teams. The project has no approved product name; “Asset Manager” is the frontend's inherited demo label. Phase 1 supplies infrastructure; Phase 2 adds real identity, sessions and service-level Casbin authorization. Phase 3 adds the first SQL inventory and shared REST/agent/MCP vertical slice; see its scoped [implementation record](odd/tasks/phase-3.md) for actual verification status.
 
 ## Components
 
@@ -16,10 +16,12 @@ Three independent Git repositories live here; root Git ignores the two component
 
 ## Start locally
 
-Requires Docker Engine + Compose. Supply `ITSM_POSTGRES_PASSWORD` through your external environment; no `.env` file is created or read by these commands.
+Phase 3 prioritizes the integrated local database, not external SQL engines. Use persistent
+SQLite with the existing named volume; optional local PostgreSQL remains available but is
+not required. Requires Docker Engine + Compose; no `.env` file is created or read.
 
 ```bash
-docker compose --env-file /dev/null --profile local-postgres up -d --wait postgres
+export ITSM_DATABASE_URL=sqlite:////data/app/itsm.db
 docker compose --env-file /dev/null build backend frontend
 docker compose --env-file /dev/null run --rm migrate
 # Supply ITSM_BOOTSTRAP_PASSWORD externally; choose your initial username/name.
@@ -30,13 +32,22 @@ export ITSM_AUTH_ORIGIN=http://127.0.0.1:18080 ITSM_AUTH_COOKIE_SECURE=false
 docker compose --env-file /dev/null up -d --wait backend worker frontend
 ```
 
-- Frontend: `http://127.0.0.1:18080` (real login/identity screens; other business modules remain prototype data).
+- Frontend: `http://127.0.0.1:18080` (identity and basic inventory; unimplemented business modules remain prototypes).
 - API/OpenAPI: `http://127.0.0.1:18000/docs`.
 - API health: `/api/v1/health/live` and `/api/v1/health/ready`.
 - Worker: separate process, same backend image, shared persistent local queue volume. Default SQLite queue requires no Redis.
 - Local PostgreSQL is optional: set `ITSM_DATABASE_URL` for external SQL and omit its profile. For local persistent SQLite main data use `sqlite:////data/app/itsm.db`; queue is a different file/volume.
 
-Profiles `redis`, `search` and `monitoring` opt into Redis, Meilisearch and Prometheus. None is required to start the base stack. Prometheus retains metrics with configurable retention; an external instance can be used instead. Device exporters, advanced search and business notification/PDF and agent execution integrations are later phases. Agents already use the same authorization service but have no autonomous runtime.
+Profiles `redis`, `search` and `monitoring` opt into Redis, Meilisearch and Prometheus. None
+is required for basic inventory/search. Device exporters, advanced search, notifications
+and PDF remain later phases. The integrated Pydantic AI agent and selected FastMCP tools
+reuse the inventory service and F2 identities; no multiagent orchestrator is introduced.
+
+The conversation route uses a server-configured model, not browser API keys. Without
+`ITSM_AGENT_MODEL` and its provider credentials, the UI reports agent unavailability;
+SQL inventory remains functional. Deterministic agent tests use simulated inference,
+not a production demo chatbot. Configuration and MCP connection instructions are in
+[operations](docs/operations.md).
 
 ## Verify
 

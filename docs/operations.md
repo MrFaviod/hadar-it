@@ -1,6 +1,6 @@
 # Infrastructure and identity operations
 
-Run commands from `asset/`. Root Compose references the two independent component checkouts; cloning root alone does not fetch them. Read backend/README.md for API/task payloads and native Python commands. The React/Vue renderer uses real FastAPI login, users, roles and sessions. Other domain data remains prototype-only.
+Run commands from `asset/`. Root Compose references the two independent component checkouts; cloning root alone does not fetch them. Read backend/README.md for API/task payloads and native Python commands. The React/Vue renderer uses real FastAPI login, users, roles and sessions. Phase 3 adds basic SQL inventory and conversation; other unimplemented domain data remains prototype-only. Current work prioritizes the integrated persistent database, not external engine certification.
 
 ## Configuration without secret files
 
@@ -11,6 +11,10 @@ The human selected documentation of variables instead of creating `.env` / `.env
 | `ITSM_AUTH_ORIGIN` | Exact browser origin; Compose default http://localhost:18080. Match the browser hostname. |
 | `ITSM_AUTH_COOKIE_SECURE` | true; explicitly false only for isolated/local HTTP. Use HTTPS otherwise. |
 | `ITSM_BOOTSTRAP_PASSWORD` | External initial password for explicit administrator CLI; no default account. |
+| `ITSM_AGENT_MODEL` | Empty disables inference; server-selected `provider:model`, e.g. `openai:gpt-4.1-mini` or `anthropic:claude-sonnet-4-5`. |
+| `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` | Provider-specific external credential; never browser input, committed configuration or a tool argument. |
+| `ITSM_AGENT_OPENAI_BASE_URL` | Optional server-owned OpenAI-compatible endpoint; never accepted from chat. |
+| `ITSM_AGENT_MAX_STEPS` / `ITSM_AGENT_MAX_HISTORY_MESSAGES` / `ITSM_AGENT_MAX_OUTPUT_TOKENS` | `8` / `20` / `1024`; bounded inference/tool interaction. |
 | `ITSM_DATABASE_URL` | PostgreSQL SQLAlchemy URL, defaults to local `postgres` with user/database `itsm` and externally supplied `ITSM_POSTGRES_PASSWORD` |
 | `ITSM_POSTGRES_PASSWORD` | No built-in password; required for the local PostgreSQL profile |
 | `ITSM_TASK_STORAGE` | `sqlite`; alternatives `redis` / `postgres` |
@@ -26,7 +30,13 @@ The human selected documentation of variables instead of creating `.env` / `.env
 | `ITSM_PROMETHEUS_RETENTION` | `7d`; valid Prometheus retention duration |
 | `ITSM_MEILI_MASTER_KEY` | Required only for optional search profile, externally supplied; functional integration deferred |
 
-### Local PostgreSQL
+### Integrated database first
+
+For the current phase use the persistent SQLite instructions below. Do not start an
+external-engine validation matrix or install Meilisearch to search inventory. Existing
+optional PostgreSQL configuration is retained, not a requirement for the vertical slice.
+
+### Local PostgreSQL (optional)
 
 Supply `ITSM_POSTGRES_PASSWORD` externally first, then:
 
@@ -75,7 +85,29 @@ Selecting the Redis profile alone does **not** change the queue; set `ITSM_TASK_
 
 Prometheus retains data in `prometheus-data`, using `deploy/prometheus.yml` and configurable retention. Initial scrape only monitors Prometheus itself; device exporters and ITSM monitoring UI integration are later phases. If using an external Prometheus, omit the local profile; the external instance and its storage/retention are managed by its owner. F1 does not call it or gate readiness on it.
 
-Meilisearch's profile reserves operational infrastructure only; SQL/advanced-search business features are not yet implemented. Casbin now evaluates identity permissions through owned portable SQL policy storage. Apprise/WeasyPrint/Pydantic AI/FastMCP execution integrations remain deferred; no unused server or agent runtime is added.
+Meilisearch's profile reserves infrastructure only; basic inventory search uses SQLAlchemy
+through an internal search interface. Casbin evaluates policies from owned SQL storage.
+Apprise/WeasyPrint and advanced search remain deferred; Pydantic AI and FastMCP reuse the
+same inventory service rather than separate business implementations.
+
+### Conversation and selected MCP tools
+
+Supply `ITSM_AGENT_MODEL` and the selected provider credential through the external
+environment, then recreate the backend intentionally. No configured model means a truthful
+503 from `/api/v1/agent/chat`, not fake conversational success. List/detail/CRUD/search
+remain usable. Simple operations are direct; the Huey worker is not mandatory for each
+tool call. This phase adds no shell, raw SQL, arbitrary URL-fetch or OS tools.
+
+The existing backend mounts streamable HTTP MCP at `/api/v1/mcp`; no extra MCP container
+or whole-REST-API export is needed. Use an explicitly installed machine identity/token
+from the F2 installer, with only the required asset permissions; human session cookies do
+not authenticate MCP. Configure Hermes or another compatible client with that URL and
+an external `Authorization: Bearer …` header. Never put the token into chat, a URL query,
+tool arguments or repository files. Revocation and Casbin checks remain backend authority.
+Selected tools are `search_assets`, `get_asset`, `create_asset`, `update_asset` and bounded
+`batch_update_assets`. Audit links operations to the actor, not a model-supplied identity.
+Live third-party provider/Hermes behavior is separate from simulated-model and actual MCP
+protocol test evidence; consult the phase record before claiming either verified.
 
 ## Upgrade and rollback
 
@@ -111,6 +143,9 @@ python3 tests/worker_cold_start.py
 # With an isolated, migrated stack and worker running:
 # Requires an isolated installed account via ITSM_TEST_USERNAME / ITSM_TEST_PASSWORD.
 ITSM_TEST_API_URL=http://127.0.0.1:18000 python3 tests/infrastructure.py
+# Isolated SQLite inventory smoke: creates uniquely named test assets, never deletes.
+# Optional ITSM_TEST_EXPECT_AGENT_UNAVAILABLE=1 checks the no-model 503 path.
+ITSM_TEST_API_URL=http://127.0.0.1:18080 python3 tests/inventory.py
 ```
 
 Backend tests and integration evidence are documented in backend/README.md and `odd/tasks/phase-1.md`. Demo task submission is development-only, not a public unauthenticated task-execution service. Bind loopback and require a proper authorization boundary before exposing real business data/actions. No automatic schema migration on health checks and no sensitive URL/secret values in logs or errors.
