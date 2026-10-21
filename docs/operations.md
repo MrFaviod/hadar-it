@@ -1,6 +1,6 @@
-# Phase 1 operations
+# Infrastructure and identity operations
 
-Run commands from `asset/`. Root Compose references the two independent component checkouts; cloning root alone does not fetch them. Read backend/README.md for API/task payloads and native Python commands. The frontend remains a client-side demo around the existing React/Vue renderer; packaging is not a backend integration or production authentication release.
+Run commands from `asset/`. Root Compose references the two independent component checkouts; cloning root alone does not fetch them. Read backend/README.md for API/task payloads and native Python commands. The React/Vue renderer uses real FastAPI login, users, roles and sessions. Other domain data remains prototype-only.
 
 ## Configuration without secret files
 
@@ -8,6 +8,9 @@ The human selected documentation of variables instead of creating `.env` / `.env
 
 | Variable | Default / meaning |
 |---|---|
+| `ITSM_AUTH_ORIGIN` | Exact browser origin; Compose default http://localhost:18080. Match the browser hostname. |
+| `ITSM_AUTH_COOKIE_SECURE` | true; explicitly false only for isolated/local HTTP. Use HTTPS otherwise. |
+| `ITSM_BOOTSTRAP_PASSWORD` | External initial password for explicit administrator CLI; no default account. |
 | `ITSM_DATABASE_URL` | PostgreSQL SQLAlchemy URL, defaults to local `postgres` with user/database `itsm` and externally supplied `ITSM_POSTGRES_PASSWORD` |
 | `ITSM_POSTGRES_PASSWORD` | No built-in password; required for the local PostgreSQL profile |
 | `ITSM_TASK_STORAGE` | `sqlite`; alternatives `redis` / `postgres` |
@@ -31,6 +34,11 @@ Supply `ITSM_POSTGRES_PASSWORD` externally first, then:
 docker compose --env-file /dev/null --profile local-postgres up -d --wait postgres
 docker compose --env-file /dev/null build backend frontend
 docker compose --env-file /dev/null run --rm migrate
+# Supply ITSM_BOOTSTRAP_PASSWORD externally; choose account details:
+docker compose --env-file /dev/null run --rm -e ITSM_BOOTSTRAP_PASSWORD backend \
+  python -m itsm.identity.cli bootstrap-admin --username YOUR_USERNAME --name 'Your administrator'
+# Only for local plain HTTP; production must retain secure cookies with HTTPS:
+export ITSM_AUTH_ORIGIN=http://127.0.0.1:18080 ITSM_AUTH_COOKIE_SECURE=false
 docker compose --env-file /dev/null up -d --wait backend worker frontend
 ```
 
@@ -44,6 +52,11 @@ Provide `ITSM_DATABASE_URL` for the chosen external database; omit `local-postgr
 export ITSM_DATABASE_URL=sqlite:////data/app/itsm.db
 docker compose --env-file /dev/null build backend frontend
 docker compose --env-file /dev/null run --rm migrate
+# Supply ITSM_BOOTSTRAP_PASSWORD externally; choose account details:
+docker compose --env-file /dev/null run --rm -e ITSM_BOOTSTRAP_PASSWORD backend \
+  python -m itsm.identity.cli bootstrap-admin --username YOUR_USERNAME --name 'Your administrator'
+# Only for local plain HTTP; production must retain secure cookies with HTTPS:
+export ITSM_AUTH_ORIGIN=http://127.0.0.1:18080 ITSM_AUTH_COOKIE_SECURE=false
 docker compose --env-file /dev/null up -d --wait backend worker frontend
 ```
 
@@ -62,7 +75,7 @@ Selecting the Redis profile alone does **not** change the queue; set `ITSM_TASK_
 
 Prometheus retains data in `prometheus-data`, using `deploy/prometheus.yml` and configurable retention. Initial scrape only monitors Prometheus itself; device exporters and ITSM monitoring UI integration are later phases. If using an external Prometheus, omit the local profile; the external instance and its storage/retention are managed by its owner. F1 does not call it or gate readiness on it.
 
-Meilisearch's profile reserves operational infrastructure only; SQL/advanced-search business features are not yet implemented. Apprise/Casbin/WeasyPrint/Pydantic AI/FastMCP are selected for later adapters, not installed as unused F1 services.
+Meilisearch's profile reserves operational infrastructure only; SQL/advanced-search business features are not yet implemented. Casbin now evaluates identity permissions through owned portable SQL policy storage. Apprise/WeasyPrint/Pydantic AI/FastMCP execution integrations remain deferred; no unused server or agent runtime is added.
 
 ## Upgrade and rollback
 
@@ -96,6 +109,7 @@ npm --prefix frontend run check
 # Creates volumes, stops its containers, does not delete volumes or touch other services.
 python3 tests/worker_cold_start.py
 # With an isolated, migrated stack and worker running:
+# Requires an isolated installed account via ITSM_TEST_USERNAME / ITSM_TEST_PASSWORD.
 ITSM_TEST_API_URL=http://127.0.0.1:18000 python3 tests/infrastructure.py
 ```
 

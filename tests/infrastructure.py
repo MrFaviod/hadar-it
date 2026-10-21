@@ -3,6 +3,7 @@
 ITSM_TEST_API_URL defaults to http://127.0.0.1:18001. No Docker lifecycle or
 production data changes are performed; only the bounded demo task is submitted.
 """
+import http.cookiejar
 import json
 import os
 import time
@@ -10,13 +11,20 @@ import urllib.error
 import urllib.request
 
 BASE = os.environ.get("ITSM_TEST_API_URL", "http://127.0.0.1:18001").rstrip("/")
+ORIGIN = os.environ.get("ITSM_AUTH_ORIGIN", BASE)
+CLIENT = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
+CSRF = ""
 
 
 def request(path, data=None):
     body = json.dumps(data).encode() if data is not None else None
-    req = urllib.request.Request(BASE + path, data=body, headers={"Content-Type": "application/json"})
+    headers = {"Content-Type": "application/json", "Origin": ORIGIN}
+    if CSRF:
+        headers["X-CSRF-Token"] = CSRF
+    url = path if path.startswith(('http://', 'https://')) else BASE + path
+    req = urllib.request.Request(url, data=body, headers=headers)
     try:
-        with urllib.request.urlopen(req, timeout=5) as response:
+        with CLIENT.open(req, timeout=5) as response:
             return response.status, json.load(response)
     except urllib.error.HTTPError as error:
         return error.code, json.load(error)
@@ -34,13 +42,22 @@ def result(task_id):
 
 
 def main():
+    global CSRF
     status, payload = request("/api/v1/health/live")
     assert (status, payload) == (200, {"status": "ok"}), (status, payload)
     status, health = request("/api/v1/health/ready")
     assert status == 200 and health["status"] == "ok", (status, health)
     assert health["migrations"]["current"] == health["migrations"]["head"], health
-    status, schema = request("/openapi.json")
+    status, schema = request(os.environ.get("ITSM_TEST_SCHEMA_URL", BASE + "/openapi.json"))
     assert status == 200 and "/api/v1/tasks/demo" in schema["paths"]
+    status, denied = request("/api/v1/tasks/demo", {"message": "unauthenticated"})
+    assert status == 401, (status, denied)
+    status, session = request("/api/v1/auth/login", {
+        "username": os.environ["ITSM_TEST_USERNAME"],
+        "password": os.environ["ITSM_TEST_PASSWORD"],
+    })
+    assert status == 200, (status, session)
+    CSRF = session["csrfToken"]
     status, rejected = request("/api/v1/tasks/demo", {"message": "", "unknown": True})
     assert status == 422 and rejected["error"]["code"] == "validation_error", (status, rejected)
     status, missing = request("/api/v1/tasks/unknown-task-123")
@@ -57,7 +74,11 @@ def main():
     assert status == 202 and scheduled["state"] == "scheduled", (status, scheduled)
     completed = result(scheduled["task_id"])
     assert completed["state"] == "complete" and completed["result"]["message"] == "scheduled-smoke", completed
-    print("PASS live/readiness/migrations/OpenAPI, validation, unknown job, real worker result, nondestructive polling and scheduled task")
+    status, logged_out = request("/api/v1/auth/logout", {})
+    assert (status, logged_out) == (200, {"status": "ok"}), (status, logged_out)
+    status, denied = request("/api/v1/tasks/" + task_id)
+    assert status == 401, (status, denied)
+    print("PASS health/migrations, authenticated worker tasks, CSRF, validation, preserved results and logout revocation")
 
 
 if __name__ == "__main__":

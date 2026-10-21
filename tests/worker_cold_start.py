@@ -4,6 +4,7 @@ Run from the workspace root. Creates two isolated projects with fresh volumes,
 uses test-only credentials and stops its containers in finally. Never deletes
 volumes, changes host services, or retries a failed worker process.
 """
+import http.cookiejar
 import json
 import os
 from pathlib import Path
@@ -21,9 +22,13 @@ def command(args, **kwargs):
 
 def exercise(order, port):
     project = "itsm-cold-" + order + "-" + uuid.uuid4().hex[:8]
+    origin = f"http://127.0.0.1:{port}"
+    password = uuid.uuid4().hex + "Aa1!"
     env = os.environ | {
         "ITSM_POSTGRES_PASSWORD": "cold-start-disposable-test-only",
         "ITSM_API_PORT": str(port),
+        "ITSM_AUTH_ORIGIN": origin,
+        "ITSM_AUTH_COOKIE_SECURE": "false",
     }
     config = json.loads(subprocess.check_output(
         ["docker", "compose", "--env-file", "/dev/null", "--profile", "local-postgres",
@@ -34,24 +39,34 @@ def exercise(order, port):
                           if name in ("postgres", "backend", "worker", "migrate")}
     for service in config["services"].values():
         service["restart"] = "no"
+    config["services"]["backend"]["environment"]["ITSM_BOOTSTRAP_PASSWORD"] = password
     compose = ["docker", "compose", "--env-file", "/dev/null", "--project-directory",
                str(ROOT), "-p", project, "-f", "-"]
 
     def run(*args):
         command(compose + list(args), input=json.dumps(config), timeout=90)
 
+    client = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
+    csrf = ""
+
     def request(path, data=None):
         body = json.dumps(data).encode() if data is not None else None
         req = urllib.request.Request(f"http://127.0.0.1:{port}/api/v1" + path,
-                                     data=body, headers={"Content-Type": "application/json"})
-        with urllib.request.urlopen(req, timeout=5) as response:
+                                     data=body, headers={"Content-Type": "application/json",
+                                                         "Origin": origin, "X-CSRF-Token": csrf})
+        with client.open(req, timeout=5) as response:
             return json.load(response)
 
     try:
         run("--profile", "local-postgres", "up", "-d", "--wait", "postgres")
         run("run", "--rm", "migrate")
+        # Disposable credentials exist only in this generated test environment.
+        run("run", "--rm", "-T", "backend", "python", "-m", "itsm.identity.cli",
+            "bootstrap-admin", "--username", "cold-test", "--name", "Cold test")
         if order == "api-first":
             run("up", "-d", "--wait", "backend")
+            session = request("/auth/login", {"username": "cold-test", "password": password})
+            csrf = session["csrfToken"]
             task = request("/tasks/demo", {"message": project})["task_id"]
             run("up", "-d", "worker")
         else:
@@ -68,6 +83,8 @@ def exercise(order, port):
                 assert time.monotonic() < deadline, logs
                 time.sleep(.2)
             run("up", "-d", "--wait", "backend")
+            session = request("/auth/login", {"username": "cold-test", "password": password})
+            csrf = session["csrfToken"]
             task = request("/tasks/demo", {"message": project})["task_id"]
         deadline = time.monotonic() + 15
         while True:
