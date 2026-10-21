@@ -1,0 +1,7 @@
+/frontend/
+/backend/
+/.worktrees/
+/.atl/
+/.codegraph/
+/.verification/
+*.local
