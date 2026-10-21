@@ -1,6 +1,6 @@
 # Unnamed ITSM project — pre-alpha
 
-Modular-monolith foundation for small IT teams. The project has no approved product name; “Asset Manager” is the frontend's inherited demo label. Phase 1 supplies infrastructure; Phase 2 adds real identity, sessions and service-level Casbin authorization. Phase 3 adds the first SQL inventory and shared REST/agent/MCP vertical slice; see its scoped [implementation record](odd/tasks/phase-3.md) for actual verification status.
+Modular-monolith foundation for small IT teams. The project has no approved product name; “Asset Manager” is the frontend's inherited demo label. Phase 1 supplies infrastructure; Phase 2 adds real identity, sessions and service-level Casbin authorization. Phase 3 adds the first SQL inventory and shared REST/agent/MCP vertical slice. Phase 4 completes the asset core with configurable forms, atomic identification, lifecycle/history and images in the existing Vue views. See [Phase 4 verification](docs/phase-4-validation.md) for executed checks and explicit limits, and its [implementation record](odd/tasks/phase-4.md) for requirements and work units.
 
 ## Components
 
@@ -16,7 +16,7 @@ Three independent Git repositories live here; root Git ignores the two component
 
 ## Start locally
 
-Phase 3 prioritizes the integrated local database, not external SQL engines. Use persistent
+The implemented inventory prioritizes verification against the integrated local database, not external SQL engines. Use persistent
 SQLite with the existing named volume; optional local PostgreSQL remains available but is
 not required. Requires Docker Engine + Compose; no `.env` file is created or read.
 
@@ -32,7 +32,7 @@ export ITSM_AUTH_ORIGIN=http://127.0.0.1:18080 ITSM_AUTH_COOKIE_SECURE=false
 docker compose --env-file /dev/null up -d --wait backend worker frontend
 ```
 
-- Frontend: `http://127.0.0.1:18080` (identity and basic inventory; unimplemented business modules remain prototypes).
+- Frontend: `http://127.0.0.1:18080` (identity and asset core; unimplemented business modules remain prototypes).
 - API/OpenAPI: `http://127.0.0.1:18000/docs`.
 - API health: `/api/v1/health/live` and `/api/v1/health/ready`.
 - Worker: separate process, same backend image, shared persistent local queue volume. Default SQLite queue requires no Redis.
