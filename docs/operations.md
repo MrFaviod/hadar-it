@@ -293,8 +293,40 @@ the existing worker schedule.
 Meilisearch's profile reserves infrastructure only; basic inventory search uses SQLAlchemy
 through an internal search interface. Casbin evaluates policies from owned SQL storage.
 Phase 8 implements Apprise delivery through the internal notification adapter described
-above; WeasyPrint and advanced search remain deferred. Pydantic AI and FastMCP reuse the
-same inventory and monitoring services rather than separate business implementations.
+above. Phase 9 uses WeasyPrint for PDFs and Segno for QR codes in the same API/worker
+image; advanced search remains deferred. Pydantic AI and FastMCP reuse the canonical
+business services rather than separate implementations.
+
+### Reports, QR codes and labels
+
+Reports use the existing Huey worker and shared `attachment-data` volume. Apply the
+explicit migration before starting the API and worker; never migrate on every process
+startup. Generated-document metadata is SQL-backed; PDF/CSV/Excel bytes use opaque blob
+keys, not asset columns or a public static directory. API and worker must use identical
+report configuration and the same blob volume.
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `ITSM_REPORT_BASE_URL` | `http://localhost:18080` | Frontend origin/deployment path encoded in permanent-UUID report QR links; no credentials, query or fragment. |
+| `ITSM_REPORT_RETENTION_DAYS` | `7` | Generated-document retention, from 1 to 3650 days. |
+| `ITSM_REPORT_MAX_ASSETS` | `1000` | Maximum matching asset selection per job, from 1 to 10000. |
+| `ITSM_REPORT_MAX_DOCUMENT_BYTES` | `52428800` | Maximum output bytes per document, at most 200 MiB. |
+| `ITSM_REPORT_RENDER_TIMEOUT_SECONDS` | `120` | Isolated PDF-render timeout, from 1 to 600 seconds. |
+| `ITSM_REPORT_RENDER_MEMORY_MB` | `512` | PDF child-process address-space limit, from 64 to 4096 MiB. |
+
+The image installs the required Pango/HarfBuzz libraries and DejaVu fonts. Rendering
+needs no additional server and accepts only structured, allowlisted templates and
+application-owned resources; never expose a filesystem directory or arbitrary resource
+fetcher to make an image appear. Configure branding through the authorized report
+settings rather than changing generated HTML. Missing branding uses generic templates.
+Keep the report base URL stable: previously printed QR codes retain their encoded URL.
+Changing an asset's site, category or quick code does not change its UUID report route.
+
+Private reports require current `assets.view` authority and generated-document
+ownership (or administrator authority). Public sharing is separate: only explicit
+`reports.share` authority can issue or revoke limited-field expiring links. An asset
+UUID or QR code is not a permission grant. Public output excludes technical details,
+IP addresses, people, costs and attachments. Do not publish a private download URL.
 
 ### Conversation and selected MCP tools
 
@@ -310,10 +342,16 @@ from the F2 installer, with only the required asset permissions; human session c
 not authenticate MCP. Configure Hermes or another compatible client with that URL and
 an external `Authorization: Bearer …` header. Never put the token into chat, a URL query,
 tool arguments or repository files. Revocation and Casbin checks remain backend authority.
-Selected tools are `search_assets`, `get_asset`, `create_asset`, `update_asset` and bounded
-`batch_update_assets`. Audit links operations to the actor, not a model-supplied identity.
-Live third-party provider/Hermes behavior is separate from simulated-model and actual MCP
-protocol test evidence; consult the phase record before claiming either verified.
+Selected inventory tools include `search_assets`, `get_asset`, `create_asset`,
+`update_asset` and bounded `batch_update_assets`. Document tools are
+`list_report_templates`, `prepare_report`, `generate_report`, `report_job_status`,
+`report_documents` and `generate_labels`. Their structured requests use canonical
+filters and UUIDs; heavy generation returns a durable Huey job, while preparation
+returns a compact authorized projection. Document references are protected API
+downloads, never public filesystem paths. Audit links operations to the actor, not
+a model-supplied identity. Live third-party provider/Hermes behavior is separate
+from scripted-model and actual MCP protocol evidence; consult the phase record
+before claiming either verified.
 
 ### Maintenance reminder preparation
 
