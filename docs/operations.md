@@ -19,6 +19,8 @@ The human selected documentation of variables instead of creating `.env` / `.env
 | `ITSM_POSTGRES_PASSWORD` | No built-in password; required for the local PostgreSQL profile |
 | `ITSM_TASK_STORAGE` | `sqlite`; alternatives `redis` / `postgres` |
 | `ITSM_TASK_SQLITE_PATH` | Compose sets `/data/tasks/huey.db`, separate from `/data/app/itsm.db` |
+| `ITSM_ATTACHMENT_STORAGE_PATH` | Compose sets `/data/attachments`, backed by independent `attachment-data` |
+| `ITSM_ATTACHMENT_MAX_BYTES` | `10485760` (10 MiB), adjustable from 1 byte to 50 MiB |
 | `ITSM_TASK_REDIS_URL` | `redis://redis:6379/0`; optional profile or external Redis |
 | `ITSM_TASK_POSTGRES_DSN` | Separate Huey PostgreSQL DSN; never infer queue choice from main SQL engine |
 | `ITSM_TASK_RETRIES` / `ITSM_TASK_RETRY_DELAY_SECONDS` | `2` / `1`; bounded demo retry policy |
@@ -123,7 +125,8 @@ Images use exact version tags and registry digests, not `latest`. Dependencies a
 
 - PostgreSQL: run `pg_dump -Fc` using your approved credentials to a protected destination. Check `pg_restore --list`, then rehearse restoration to a fresh database and run migrations/readiness. External database backups belong to the external operator; local Docker volumes are not backups.
 - SQLite main DB: use SQLite's online backup API/`.backup`, not a casual copy of a live WAL database. For a cold file backup, stop the owned API/worker first and include a consistent database/WAL state.
-- Huey SQLite: pause this workspace's API enqueue/worker, back up the entire queue volume consistently; restoring it may replay jobs. Future business jobs must be idempotent. Do not restore queue state independently of related business data without considering duplicate effects.
+- Huey SQLite: pause this workspace's API enqueue/worker, back up the entire queue volume consistently; restoring it may replay jobs. Phase 6 jobs use durable per-row receipts in main SQL to avoid replaying successful rows. Do not restore queue state independently of related business data without considering duplicate effects.
+- Attachments: back up `attachment-data` together with a consistent main SQL snapshot. SQL stores metadata and opaque blob keys, not file bytes. Restoring only SQL or only the volume is incomplete. Coordinate uploads/deletions during backup and rehearse authenticated downloads after restoring to isolated state. Do not delete unknown blobs as an improvised cleanup operation; interrupted writes may leave unreferenced objects requiring an explicitly authorized reconciliation.
 - Optional Redis: persist AOF and back up consistently using Redis procedures. Prometheus: use its supported snapshot/TSDB procedure or a cold backup of its owned volume; restoring metrics is independent of inventory availability.
 - Back up root/frontend/backend repositories separately, external settings and named volumes. Never commit backup files or secrets.
 - Rehearse recovery in a new isolated Compose project/volumes before replacing production. No backup/restore against existing server services is performed by this phase.

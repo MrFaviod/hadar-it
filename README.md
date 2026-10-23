@@ -2,6 +2,32 @@
 
 Modular-monolith foundation for small IT teams. The project has no approved product name; “Asset Manager” is the frontend's inherited demo label. Phase 1 supplies infrastructure; Phase 2 adds real identity, sessions and service-level Casbin authorization. Phase 3 adds the first SQL inventory and shared REST/agent/MCP vertical slice. Phase 4 completes the asset core with configurable forms, atomic identification, lifecycle/history and images in the existing Vue views. Phase 5 adds inventory people and departments, hierarchical locations, assignments and transfers, directed physical/virtual relationships, structured history, bounded maps/graphs and descriptive replica groups (active/passive or configured workload shares such as 40:60). See [Phase 5 verification](docs/phase-5-validation.md) and its [implementation record](odd/tasks/phase-5.md) for executed checks, corrections and explicit limits. [Phase 4 verification](docs/phase-4-validation.md) records the earlier asset-core foundation.
 
+## Phase 6 verified integration
+
+SQL-backed CSV/XLSX import inspection and profiles, conservative duplicate review,
+fixed human-approved bulk previews, real CSV export, independent attachments and
+individual warranties are connected to the existing Vue interfaces. Long-running
+operations use the existing Huey adapter with persisted progress and retry receipts;
+REST, Pydantic AI and FastMCP share canonical services.
+
+See the [Phase 6 implementation record](odd/tasks/phase-6.md),
+[executed evidence and limits](docs/phase-6-validation.md),
+[backend contracts](backend/docs/phase6-workflows.md) and
+[incumbent frontend integration](frontend/docs/phase6-workflows.md).
+The backend checkpoint is `af4cc27`: 549 tests passed, six gated skips and two known
+SQLite warnings. Frontend checks passed Node tests, TypeScript and build;
+the fresh-state real browser passed original import/approval/export/bulk/receipt/
+warranty/reload flows without overflow at 390 and 1440 px. Frontend checkpoint
+`0c7ece0` includes the advisory concurrency correction; its final checks passed
+**296** Node tests, TypeScript and build, followed by the real browser pass.
+Localized independent reviews and remaining proof limits are recorded in the implementation record.
+This remains pre-alpha, not production or external-engine certification.
+
+Compose declares a separate `attachment-data` volume shared by the API and worker.
+Attachment SQL metadata and bytes must be backed up together; see
+[operations](docs/operations.md#backups-and-recovery).
+No deployment or existing-container change is implied by this configuration.
+
 ## Components
 
 Three independent Git repositories live here; root Git ignores the two components. Clone/back up each independently. No submodules or release pipeline are implied.
