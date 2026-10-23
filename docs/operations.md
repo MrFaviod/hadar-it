@@ -111,6 +111,25 @@ Selected tools are `search_assets`, `get_asset`, `create_asset`, `update_asset` 
 Live third-party provider/Hermes behavior is separate from simulated-model and actual MCP
 protocol test evidence; consult the phase record before claiming either verified.
 
+### Maintenance reminder preparation
+
+Phase 7 adds persisted preventive plans, interventions and technical incidents. Apply
+migrations explicitly before API/worker startup. The original Vue maintenance screens
+use these APIs; monitoring and automatic device-recovery signals remain out of scope.
+
+The existing Huey consumer registers `maintenance_due_scan` every five minutes. Keep
+one periodic scheduler per queue. Each scan reads active, non-archived plans due within
+30 days, including overdue plans, and prepares one SQL reminder per plan, due date
+and stage (`upcoming` or `overdue`). Durable uniqueness makes retries and competing
+scans idempotent. Queue retry settings remain `ITSM_TASK_RETRIES` and
+`ITSM_TASK_RETRY_DELAY_SECONDS`; no additional service or secret is needed.
+
+Observe the structured worker event `maintenance.reminders_prepared` and its `created`
+and `scanned` counters. Preparation never completes a plan, resolves an incident or
+sends email/Telegram. Apprise delivery belongs to the later supervision/alerts phase.
+See `backend/docs/maintenance.md`, `backend/docs/interventions.md` and
+`backend/docs/agent-tools.md` for operation and permission contracts.
+
 ## Upgrade and rollback
 
 1. Record all three Git revisions, component versions and image digests. Back up main DB and queue before schema/library changes.
