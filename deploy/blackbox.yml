@@ -1,0 +1,38 @@
+# Blackbox Exporter modules used by deploy/prometheus.yml.
+# Targets are discovered from ITSM; never add per-device files here.
+# ICMP requires the NET_RAW capability granted in compose.yaml.
+modules:
+  icmp:
+    prober: icmp
+    timeout: 5s
+    icmp:
+      preferred_ip_protocol: ip4
+      ip_protocol_fallback: true
+
+  http_2xx:
+    prober: http
+    timeout: 10s
+    http:
+      preferred_ip_protocol: ip4
+      ip_protocol_fallback: true
+      follow_redirects: true
+      valid_status_codes: [200, 201, 202, 204, 301, 302, 307, 308]
+
+  tcp_connect:
+    prober: tcp
+    timeout: 5s
+    tcp:
+      preferred_ip_protocol: ip4
+      ip_protocol_fallback: true
+
+  # The discovered target is the DNS resolver address (host:53). The query
+  # name is fixed per installation; for a resolver that is authoritative only
+  # for internal zones, replace example.com one time in this shared module.
+  dns_udp:
+    prober: dns
+    timeout: 5s
+    dns:
+      preferred_ip_protocol: ip4
+      ip_protocol_fallback: true
+      query_name: example.com
+      query_type: A

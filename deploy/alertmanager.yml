@@ -1,0 +1,40 @@
+# Alertmanager configuration used by the optional monitoring-alertmanager profile.
+#
+# When this service is enabled it is the single authority for grouping,
+# inhibition and silences. Do not duplicate those rules in the ITSM adapter.
+# Human acknowledgement, incident linkage and notification policy remain in
+# ITSM; this receiver only transports native Prometheus alerts.
+route:
+  receiver: itsm
+  # Stable asset identifier is the grouping key, matching the ITSM event key.
+  group_by: [asset_id]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    - matchers:
+        - severity="critical"
+      receiver: itsm
+      group_wait: 10s
+      repeat_interval: 1h
+
+receivers:
+  - name: itsm
+    webhook_configs:
+      - url: http://backend:8000/api/v1/monitoring/alertmanager
+        send_resolved: true
+        max_alerts: 0
+        http_config:
+          authorization:
+            type: Bearer
+            credentials_file: /run/secrets/monitoring_ingest_token
+
+# A critical condition suppresses lower-severity noise for the same asset.
+# Acknowledgement and recovery are not expressed here: acknowledgement never
+# resolves an alert, and recovery is emitted by Prometheus as send_resolved.
+inhibit_rules:
+  - source_matchers:
+      - severity="critical"
+    target_matchers:
+      - severity="warning"
+    equal: [asset_id]

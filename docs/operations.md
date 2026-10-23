@@ -26,10 +26,23 @@ The human selected documentation of variables instead of creating `.env` / `.env
 | `ITSM_TASK_RETRIES` / `ITSM_TASK_RETRY_DELAY_SECONDS` | `2` / `1`; bounded demo retry policy |
 | `ITSM_DEMO_PERIODIC_MINUTES` | `0` disables the periodic demo; 1–60 enables a worker schedule |
 | `ITSM_LOG_LEVEL` | `INFO`; structured application/worker logs |
-| `ITSM_PROMETHEUS_URL` / `ITSM_MEILISEARCH_URL` / `ITSM_SERVICE_REDIS_URL` | Optional external service descriptors, informational in F1, not readiness dependencies |
+| `ITSM_MEILISEARCH_URL` / `ITSM_SERVICE_REDIS_URL` | Optional service descriptors; not readiness dependencies |
+| `ITSM_PROMETHEUS_URL` | Engine base URL used by the monitoring adapter. Compose default `http://prometheus:9090` for the local profile; set an external HTTPS URL instead. An empty or unreachable engine is reported as unavailable, never as every device down. Credentials/query/fragment are rejected; use the token variable. |
+| `ITSM_PROMETHEUS_TOKEN` | Optional bearer for an external Prometheus API. Secret; never in URLs, logs or Git. |
+| `ITSM_ALERTMANAGER_URL` | Empty disables native Alertmanager mode. Set `http://alertmanager:9093` with the local profile, or the external address. |
+| `ITSM_ALERTMANAGER_TOKEN` | Optional bearer for the Alertmanager API (silences) when your instance enforces auth. |
+| `ITSM_MONITORING_DISCOVERY_TOKEN` | Shared bearer for Prometheus HTTP service discovery and configuration metrics. Required by the local Prometheus profile; supply it externally. |
+| `ITSM_MONITORING_INGEST_TOKEN` | Bearer Alertmanager presents to the ITSM webhook. Required when AM posts; distinct from the discovery token. |
+| `ITSM_MONITORING_HTTP_TIMEOUT_SECONDS` | `10`; bounded 1–60 seconds for engine/Alertmanager calls. |
+| `ITSM_MONITORING_POLL_SECONDS` | `60`; bounded 60–3600; Huey polling cadence when native Alertmanager mode is off. |
+| `ITSM_MONITORING_PUBLIC_URL` | User-facing base used in links, default `http://localhost:18080`. |
+| `ITSM_MONITORING_SECRETS` | JSON object mapping an Apprise reference to its full URL/token, supplied externally. API responses expose only whether a reference is configured. |
+| `ITSM_SNMP_AUTHS` | YAML `auths:` document for the SNMP Exporter, supplied externally and projected as a Compose secret file for `monitoring-snmp`. Required by that profile; never committed, printed or stored in ITSM. |
+| `ITSM_NOTIFICATION_RETENTION_DAYS` | `90`; bounded 1–3650; delivered/failed notification and inbox retention. |
 | `ITSM_API_PORT` / `ITSM_FRONTEND_PORT` | Loopback `18000` / `18080` |
 | `ITSM_PROMETHEUS_PORT` | Loopback `19090` |
-| `ITSM_PROMETHEUS_RETENTION` | `7d`; valid Prometheus retention duration |
+| `ITSM_PROMETHEUS_RETENTION` | `7d`; valid Prometheus retention duration; ignored by an external engine |
+| `ITSM_ALERTMANAGER_PORT` | Loopback `19093` for the optional local Alertmanager |
 | `ITSM_MEILI_MASTER_KEY` | Required only for optional search profile, externally supplied; functional integration deferred |
 
 ### Integrated database first
@@ -77,7 +90,6 @@ SQLite main data persists in `app-data`; task queue/results in `task-data`. Thes
 ### Optional services
 
 ```bash
-docker compose --env-file /dev/null --profile monitoring up -d prometheus
 docker compose --env-file /dev/null --profile redis up -d redis
 # Only when ITSM_MEILI_MASTER_KEY is supplied externally:
 docker compose --env-file /dev/null --profile search up -d meilisearch
@@ -85,12 +97,204 @@ docker compose --env-file /dev/null --profile search up -d meilisearch
 
 Selecting the Redis profile alone does **not** change the queue; set `ITSM_TASK_STORAGE=redis` and its URL, then recreate API/worker intentionally. Likewise PostgreSQL queue uses `ITSM_TASK_STORAGE=postgres` plus its own DSN. Queue tables/storage lifecycle belongs to Huey, separate from main Alembic migrations.
 
-Prometheus retains data in `prometheus-data`, using `deploy/prometheus.yml` and configurable retention. Initial scrape only monitors Prometheus itself; device exporters and ITSM monitoring UI integration are later phases. If using an external Prometheus, omit the local profile; the external instance and its storage/retention are managed by its owner. F1 does not call it or gate readiness on it.
+### Monitoring topology
+
+Each optional profile starts one service; enable only what the installation monitors.
+No profile is a readiness dependency, and a decommissioned profile never fabricates data.
+
+| Service | Profile | Port | Storage / notes |
+|---|---|---|---|
+| Prometheus | `monitoring` | loopback `19090` | `prometheus-data`, retention `ITSM_PROMETHEUS_RETENTION` |
+| Blackbox Exporter | `monitoring-blackbox` | internal `9115` | ICMP/HTTP(S)/TCP/DNS probes; `NET_RAW` for ICMP |
+| SNMP Exporter | `monitoring-snmp` | internal `9116` | switches, gateways, routers; auths supplied externally |
+| Node Exporter | `monitoring-node` | host `9100` | host network/PID, read-only `/proc`, `/sys`, `/` |
+| Alertmanager | `monitoring-alertmanager` | loopback `19093` | `alertmanager-data`; native silences |
+
+```bash
+# Tokens come from your external secret manager; do not export them in shared shells.
+# ITSM_MONITORING_DISCOVERY_TOKEN: Prometheus -> ITSM discovery/config endpoints
+# ITSM_MONITORING_INGEST_TOKEN:    Alertmanager -> ITSM webhook
+docker compose --env-file /dev/null \
+  --profile monitoring --profile monitoring-blackbox \
+  --profile monitoring-snmp --profile monitoring-node \
+  --profile monitoring-alertmanager up -d
+```
+
+Start a subset when an installation only needs HTTP probes, only switches, or only host
+metrics. `docker compose config` succeeds without the tokens; `up` of a profile that
+mounts a token secret requires its environment variable. The API and worker must carry
+the same token values so the discovery/metrics endpoints and webhook accept the callers.
+`monitoring-snmp` additionally requires `ITSM_SNMP_AUTHS` (see below); without it the
+exporters fail at startup rather than probing with an empty credential.
+
+Images are pinned by tag and registry digest:
+
+| Image | Digest |
+|---|---|
+| `prom/prometheus:v3.14.0` | `sha256:5ce7540c3c00ef4ab0c9d2c995c6a5b9c421f44b4a115d97a2c7af3b1c21cbb0` |
+| `prom/blackbox-exporter:v0.29.1` | `sha256:ea1c7aa3ef3f307cd03e85f34abb604478ccb90b567fc690da0cd9776da76b13` |
+| `prom/snmp-exporter:v0.30.1` | `sha256:e5fd5e8b43ace6c088fe9bf0b37b7fff0e04380bee352be7ec41b853a4dd5859` |
+| `prom/node-exporter:v1.12.1` | `sha256:1b4e4438faca4dd7e001dd445d161a4a2091b0fededa84093b3a8dfeae1f1be0` |
+| `prom/alertmanager:v0.34.1` | `sha256:e9733bafb1bdef9b00e25a21f8f99dc26a22224bf16641ad754d1649f4c3357a` |
+
+#### Discovery, rules and retention
+
+Prometheus discovers targets from ITSM over native HTTP service discovery, one endpoint
+per check type (`icmp`, `http`, `tcp`, `dns`, `snmp`, `node`, `windows`), refreshing every
+60 seconds. Adding, changing or disabling an asset changes the next discovery response;
+there are no per-device files, target lists or reload steps. An asset that is disabled,
+targetless or unmonitored is absent, which is not the same as offline.
+
+`deploy/prometheus.yml` also scrapes the ITSM configuration endpoint as series: per-asset
+enabled flag, thresholds and minimum-duration preset. `deploy/prometheus-rules.yml` is a
+fixed versioned bundle installed once in the engine. It uses literal native `for`
+durations for the supported presets (0/60/300/900 seconds) and stays silent for any
+target not on that preset; no generated rule files, Huey reloads or arbitrary durations
+are claimed. Intermittent behavior uses `changes()` over real probe results and
+discovered scrape (`up`) series, not a synthetic state machine. Threshold comparison
+uses normalized units: latency seconds, CPU/memory/disk percent, temperature Celsius.
+Scrape cadence defaults to 60 seconds per job. The per-asset `interval_seconds` label is
+honored natively for the supported presets (30/60/300/900 seconds) through the special
+`__scrape_interval__` relabel target; an absent or unsupported value keeps the job's 60
+seconds, and the explicit 10-second scrape timeout stays below the smallest preset. The
+target API exposes the effective `scrapeInterval`/`scrapeTimeout` per active target
+(`discoveredLabels.__scrape_interval__` still shows the job default), while the
+`itsm_monitoring_check_interval_seconds` configuration series mirrors the same setting.
+
+Prometheus stores its own TSDB in `prometheus-data`; retention is configurable and
+independent of inventory and notification retention. An external Prometheus keeps its
+own storage and retention.
+
+#### Native Alertmanager mode
+
+With `monitoring-alertmanager` enabled, set `ITSM_ALERTMANAGER_URL` (and
+`ITSM_ALERTMANAGER_TOKEN` only if your Alertmanager enforces auth). Alertmanager is then
+the sole authority for grouping, inhibition and silences; ITSM creates and expires
+silences through its API instead of keeping a second suppression system. Prometheus posts
+standard v4 webhooks to the ITSM backend, authenticated by `ITSM_MONITORING_INGEST_TOKEN`;
+the adapter accepts a bounded body, keys events by stable asset identifier and rejects
+unknown assets. Acknowledgement never resolves an alert, and recovery never closes a
+linked incident.
+
+Without Alertmanager, ITSM polls native Prometheus alerts through the existing Huey
+schedule and applies suppression locally for notifications only. Inventory, monitoring
+configuration and device state remain usable with no engine and no Alertmanager at all;
+missing engine data is reported as unavailable or no-data, never as devices down.
+
+Do not duplicate grouping/inhibition/silence rules in two systems. The local
+`deploy/alertmanager.yml` is deliberately minimal: group by `asset_id`, suppress a
+warning while a critical exists for the same asset, and route to the authenticated ITSM
+webhook. Alertmanager clustering is disabled (single replica); silences persist in
+`alertmanager-data`.
+
+#### External Prometheus (one-time installation)
+
+An external Prometheus uses the same discovery and rule contract; ITSM never requires
+remote write or engine-specific plugins.
+
+1. Install `deploy/prometheus.yml` as a base or merge its jobs into the existing config:
+   the `itsm-monitoring` config scrape, one HTTP SD job per check type, exporter
+   self-scrape, and the SNMP job at `/snmp`. Replace `backend:8000` with the ITSM backend
+   address reachable from the Prometheus host and `blackbox-exporter:9115` /
+   `snmp-exporter:9116` with addresses routable from that host.
+2. Mount the discovery token where `credentials_file` points and set the same value in
+   `ITSM_MONITORING_DISCOVERY_TOKEN` for the API. Do not inline the token in YAML.
+3. Install `deploy/prometheus-rules.yml` into `rule_files` once and reload configuration.
+   Later asset/threshold/preset changes are read from ITSM series; this file does not
+   change per device.
+4. Point `ITSM_PROMETHEUS_URL` at the engine API, with `ITSM_PROMETHEUS_TOKEN` when the
+   API is authenticated. Keep the engine API private; do not expose TSDB endpoints
+   publicly, and use TLS at your reverse proxy.
+5. If an exporter for a check type runs elsewhere, set that installation's
+   `exporter_address` in ITSM so discovery overrides the scrape address while the asset
+   target remains the probed destination.
+
+#### Exporters on monitored hosts
+
+- Linux servers: run `node_exporter` natively under the host service manager, expose
+  `:9100` only to the Prometheus engine, and register the asset with `checkType: node`
+  and target `host:9100`. The `monitoring-node` profile is for the Docker host itself.
+- Windows servers: install `windows_exporter` as a native Windows service from its MSI,
+  expose `:9182` only to the engine, and register `checkType: windows` with target
+  `host:9182`. Never install a Linux node exporter service on Windows.
+- DNS: register the asset with `checkType: dns` and the resolver address (`host:53`)
+  as target. The question name/type is fixed in the shared module `dns_udp` in
+  `deploy/blackbox.yml` (default `example.com` A); replace it once for internal zones.
+  It is not configurable per device and never creates a per-asset file.
+- SNMP: one shared SNMP exporter serves many devices. Credentials exist only in its
+  `auths` document, never in ITSM, API responses, logs or Git; ITSM stores only the auth
+  reference name per asset. Supply the document through the external environment as
+  `ITSM_SNMP_AUTHS`; Compose projects it as a secret file and passes it to the exporter
+  as a second `--config.file`. The committed `deploy/snmp.yml` contains modules only and
+  ships no auths or default community, so the profile cannot start without the
+  environment value and never probes with an empty or public credential. Example
+  document shape, values supplied externally and never committed:
+
+  ```yaml
+  auths:
+    switch-core:
+      version: 2
+      community: <community>
+  ```
+
+  Use SNMPv2c or v3 USM per device capability. Never a shared default public community.
+  The fixed SNMP job selects `/snmp`, the module from ITSM (default `if_mib`) and the
+  auth reference only when configured; availability is `up`, and an exporter outage is
+  excluded from device-down evaluation.
+
+No per-device manual Prometheus file is required or supported. Hosts that cannot run an
+exporter are configured with ICMP/TCP/HTTP checks or left unmonitored.
+
+#### Notification delivery
+
+Delivery uses the internal Apprise adapter and the existing Huey worker. Channels are
+configured in ITSM; each external channel stores a secret reference, never the URL/token.
+`ITSM_MONITORING_SECRETS` maps those references to full Apprise URLs supplied externally:
+
+```text
+{"<channel-reference>":"<full-apprise-url-or-token>"}
+```
+
+The internal channel needs no external credential. SMTP and Telegram are external
+channels; additional Apprise kinds are optional. Responses expose only whether a reference
+is configured, and logs/errors redact URLs, passwords and tokens. Test channels
+deliberately; do not send real external notifications without authorization.
+
+Delivery is durable: a SQL outbox keyed by alert cycle, rule, recipient, channel and
+escalation bucket feeds the queue by stable SQL id, so retries and competing workers do
+not duplicate a notification. Only confirmed failures retry; ambiguous delivery remains
+marked uncertain instead of being reported as success or duplicated. Delivered and failed
+records, inbox entries and read state follow `ITSM_NOTIFICATION_RETENTION_DAYS`. No metric
+samples are stored in SQL, and there is no second scheduler: delivery and polling reuse
+the existing worker schedule.
+
+#### Monitoring troubleshooting
+
+- Prometheus at `http://127.0.0.1:19090` shows discovery errors on its Targets page; a
+  401/403 means the discovery token differs between the engine and the API, not a
+  monitoring outage. An empty HTTP SD response is correct when no asset of that check
+  type is enabled.
+- `probe_success` drives ICMP/HTTP/TCP/DNS; `up` drives node/windows/SNMP. Missing series
+  is `no_data`, never `down`; engine errors and absent samples are not converted into
+  device-down events. SNMP device-down rules are gated on the exporter self-scrape, so an
+  exporter outage is not reported as every switch down.
+- Alerts fire only for the target's own duration preset (0/60/300/900 seconds); the
+  `preset` label shows which rule matched. A disabled or threshold-less asset has no
+  configuration series, so threshold rules stay silent.
+- Native Alertmanager mode is selected solely by `ITSM_ALERTMANAGER_URL`. Silences then
+  exist only in Alertmanager (`/api/v2/silences`, UI at loopback `19093`), and ITSM keeps
+  no duplicate local suppression. Without the URL, alerts are polled through the existing
+  Huey schedule and suppression applies to notifications only.
+- Engine connection failure surfaces as `unavailable` monitoring state; inventory, asset
+  sheets and configuration remain usable. Do not record outages from your own failed
+  queries. Periods are UTC and bounded (24h/7d/30d, at most 300 points per series);
+  provenance is the engine plus the queried period.
 
 Meilisearch's profile reserves infrastructure only; basic inventory search uses SQLAlchemy
 through an internal search interface. Casbin evaluates policies from owned SQL storage.
-Apprise/WeasyPrint and advanced search remain deferred; Pydantic AI and FastMCP reuse the
-same inventory service rather than separate business implementations.
+Phase 8 implements Apprise delivery through the internal notification adapter described
+above; WeasyPrint and advanced search remain deferred. Pydantic AI and FastMCP reuse the
+same inventory and monitoring services rather than separate business implementations.
 
 ### Conversation and selected MCP tools
 
@@ -115,7 +319,10 @@ protocol test evidence; consult the phase record before claiming either verified
 
 Phase 7 adds persisted preventive plans, interventions and technical incidents. Apply
 migrations explicitly before API/worker startup. The original Vue maintenance screens
-use these APIs; monitoring and automatic device-recovery signals remain out of scope.
+use these APIs. Phase 8 links monitoring events to incidents, but acknowledgement,
+recovery and closure stay separate: acknowledgement never resolves, recovery never
+auto-closes an incident, and closing remains an explicit human decision with an
+assisted-close suggestion.
 
 The existing Huey consumer registers `maintenance_due_scan` every five minutes. Keep
 one periodic scheduler per queue. Each scan reads active, non-archived plans due within
@@ -126,7 +333,8 @@ scans idempotent. Queue retry settings remain `ITSM_TASK_RETRIES` and
 
 Observe the structured worker event `maintenance.reminders_prepared` and its `created`
 and `scanned` counters. Preparation never completes a plan, resolves an incident or
-sends email/Telegram. Apprise delivery belongs to the later supervision/alerts phase.
+sends email/Telegram. Delivery is owned by the Phase 8 notification service described
+above; the maintenance scan only prepares durable reminder rows.
 See `backend/docs/maintenance.md`, `backend/docs/interventions.md` and
 `backend/docs/agent-tools.md` for operation and permission contracts.
 
@@ -146,7 +354,7 @@ Images use exact version tags and registry digests, not `latest`. Dependencies a
 - SQLite main DB: use SQLite's online backup API/`.backup`, not a casual copy of a live WAL database. For a cold file backup, stop the owned API/worker first and include a consistent database/WAL state.
 - Huey SQLite: pause this workspace's API enqueue/worker, back up the entire queue volume consistently; restoring it may replay jobs. Phase 6 jobs use durable per-row receipts in main SQL to avoid replaying successful rows. Do not restore queue state independently of related business data without considering duplicate effects.
 - Attachments: back up `attachment-data` together with a consistent main SQL snapshot. SQL stores metadata and opaque blob keys, not file bytes. Restoring only SQL or only the volume is incomplete. Coordinate uploads/deletions during backup and rehearse authenticated downloads after restoring to isolated state. Do not delete unknown blobs as an improvised cleanup operation; interrupted writes may leave unreferenced objects requiring an explicitly authorized reconciliation.
-- Optional Redis: persist AOF and back up consistently using Redis procedures. Prometheus: use its supported snapshot/TSDB procedure or a cold backup of its owned volume; restoring metrics is independent of inventory availability.
+- Optional Redis: persist AOF and back up consistently using Redis procedures. Prometheus: back up its owned `prometheus-data` volume cold (stop the service or snapshot the filesystem) or use its supported TSDB procedure; retention is not a backup. Alertmanager state (silences and notification log) lives in `alertmanager-data`; back it up separately. Notification outbox, inbox and delivery history live in main SQL and follow the SQL backup procedure. Restoring metrics or Alertmanager state is independent of inventory availability.
 - Back up root/frontend/backend repositories separately, external settings and named volumes. Never commit backup files or secrets.
 - Rehearse recovery in a new isolated Compose project/volumes before replacing production. No backup/restore against existing server services is performed by this phase.
 
@@ -154,6 +362,49 @@ Images use exact version tags and registry digests, not `latest`. Dependencies a
 
 ```bash
 docker compose --env-file /dev/null config --quiet
+docker compose --env-file /dev/null --profile monitoring config --quiet
+# Prometheus config/rules; point the token mount at the same external file the engine uses.
+docker run --rm --security-opt label=disable \
+  -v "$PWD/deploy/prometheus.yml:/etc/prometheus/prometheus.yml:ro" \
+  -v "$PWD/deploy/prometheus-rules.yml:/etc/prometheus/rules/itsm-rules.yml:ro" \
+  -v /path/to/discovery-token:/run/secrets/monitoring_discovery_token:ro \
+  --entrypoint promtool \
+  prom/prometheus:v3.14.0@sha256:5ce7540c3c00ef4ab0c9d2c995c6a5b9c421f44b4a115d97a2c7af3b1c21cbb0 \
+  check config /etc/prometheus/prometheus.yml
+docker run --rm --security-opt label=disable \
+  -v "$PWD/deploy/prometheus-rules.yml:/rules.yml:ro" \
+  --entrypoint promtool \
+  prom/prometheus:v3.14.0@sha256:5ce7540c3c00ef4ab0c9d2c995c6a5b9c421f44b4a115d97a2c7af3b1c21cbb0 \
+  check rules /rules.yml
+docker run --rm --security-opt label=disable \
+  -v "$PWD/deploy/blackbox.yml:/etc/blackbox_exporter/blackbox.yml:ro" \
+  prom/blackbox-exporter:v0.29.1@sha256:ea1c7aa3ef3f307cd03e85f34abb604478ccb90b567fc690da0cd9776da76b13 \
+  --config.check --config.file=/etc/blackbox_exporter/blackbox.yml
+docker run --rm --security-opt label=disable \
+  -v "$PWD/deploy/snmp.yml:/etc/snmp_exporter/snmp.yml:ro" \
+  -v /path/to/projected-auths.yml:/run/secrets/snmp_auths.yml:ro \
+  prom/snmp-exporter:v0.30.1@sha256:e5fd5e8b43ace6c088fe9bf0b37b7fff0e04380bee352be7ec41b853a4dd5859 \
+  --config.file=/etc/snmp_exporter/snmp.yml \
+  --config.file=/run/secrets/snmp_auths.yml --dry-run
+# The auths file above is the content of ITSM_SNMP_AUTHS, materialized only for this
+# disposable check; alternatively run the same --dry-run inside the running profile so
+# the secret is already projected at /run/secrets/snmp_auths.yml.
+docker run --rm --security-opt label=disable \
+  -v "$PWD/deploy/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro" \
+  -v /path/to/ingest-token:/run/secrets/monitoring_ingest_token:ro \
+  --entrypoint amtool \
+  prom/alertmanager:v0.34.1@sha256:e9733bafb1bdef9b00e25a21f8f99dc26a22224bf16641ad754d1649f4c3357a \
+  check-config /etc/alertmanager/alertmanager.yml
+# Discovery and configuration metrics use the bearer the engine mounts; never print it.
+curl -fsS -H "Authorization: Bearer $ITSM_MONITORING_DISCOVERY_TOKEN" \
+  "http://127.0.0.1:18000/api/v1/monitoring/discovery?check_type=http"
+curl -fsS -H "Authorization: Bearer $ITSM_MONITORING_DISCOVERY_TOKEN" \
+  http://127.0.0.1:18000/api/v1/monitoring/prometheus-metrics
+# Effective target schedule; discoveredLabels keep the per-job defaults.
+curl -fsS http://127.0.0.1:19090/api/v1/targets | python3 -c \
+  'import json,sys; [print(t["labels"].get("asset_id"), t["scrapeInterval"], t["scrapeTimeout"]) for t in json.load(sys.stdin)["data"]["activeTargets"]]'
+curl -fsS http://127.0.0.1:19090/-/ready
+curl -fsS http://127.0.0.1:19093/-/ready
 curl --fail http://127.0.0.1:18000/api/v1/health/live
 curl --fail http://127.0.0.1:18000/api/v1/health/ready
 docker compose --env-file /dev/null ps

@@ -1,0 +1,321 @@
+# ITSM deployment - versioned native Prometheus rule bundle.
+#
+# This file is fixed configuration:
+# - per-asset thresholds and minimum-duration presets arrive as series scraped
+#   from the ITSM monitoring configuration endpoint (job itsm-monitoring);
+# - rules never edit target files and never require a generation/reload step;
+# - the same bundle is installed once in an external Prometheus.
+#
+# Supported minimum-duration presets are 0/60/300/900 seconds, so each alert
+# family is expressed once per preset with a literal native `for` and a gate on
+# that preset's configuration series. A target selects exactly one preset, so
+# only one variant can ever fire for an asset. The selected preset is carried
+# as the `preset` label; asset_id remains the stable key.
+
+groups:
+  # Normalized asset gauges. Recording rules convert real exporter families
+  # into the percentage/Celsius units used by configured thresholds and label
+  # them with `metric` so a single comparison rule can serve every metric.
+  - name: itsm-normalized
+    interval: 30s
+    rules:
+      - record: itsm:asset_utilization:percent
+        expr: |
+          label_replace(
+            (1 - avg by (asset_id, asset_name) (rate(node_cpu_seconds_total{job="node", mode="idle"}[5m]))) * 100,
+            "metric", "cpu", "", ""
+          )
+          or label_replace(
+            (1 - avg by (asset_id, asset_name) (rate(windows_cpu_time_total{job="windows", mode="idle"}[5m]))) * 100,
+            "metric", "cpu", "", ""
+          )
+          or label_replace(
+            max by (asset_id, asset_name) (1 - node_memory_MemAvailable_bytes{job="node"} / node_memory_MemTotal_bytes{job="node"}) * 100,
+            "metric", "memory", "", ""
+          )
+          or label_replace(
+            max by (asset_id, asset_name) (1 - windows_memory_available_bytes{job="windows"} / windows_cs_physical_memory_bytes{job="windows"}) * 100,
+            "metric", "memory", "", ""
+          )
+          or label_replace(
+            max by (asset_id, asset_name) (
+              (1 - node_filesystem_avail_bytes{job="node", fstype!~"tmpfs|overlay|squashfs"}
+                 / node_filesystem_size_bytes{job="node", fstype!~"tmpfs|overlay|squashfs"}) * 100
+            ),
+            "metric", "disk", "", ""
+          )
+          or label_replace(
+            max by (asset_id, asset_name) (
+              (1 - windows_logical_disk_free_bytes{job="windows"}
+                 / windows_logical_disk_size_bytes{job="windows"}) * 100
+            ),
+            "metric", "disk", "", ""
+          )
+
+      - record: itsm:asset_temperature:celsius
+        expr: |
+          label_replace(
+            max by (asset_id, asset_name) (node_hwmon_temp_celsius{job="node"}),
+            "metric", "temperature", "", ""
+          )
+
+  # Availability. probe_success covers Blackbox checks; `up` covers direct
+  # exporter scrapes (node/windows) and SNMP, where an unreachable exporter is
+  # excluded instead of being reported as every device down.
+  - name: itsm-availability
+    rules:
+      - alert: ItsmCheckDown
+        expr: |
+          (
+            probe_success == 0
+            or up{job=~"node|windows"} == 0
+            or (up{job="snmp"} == 0 and on () (up{job="snmp-exporter"} == 1))
+          )
+          and on (asset_id) itsm_monitoring_check_enabled == 1
+          and on (asset_id) itsm_monitoring_check_duration_preset_seconds == 0
+        for: 0s
+        labels:
+          severity: critical
+          preset: "0"
+        annotations: &check_down_notes
+          summary: "{{ $labels.asset_name }} ({{ $labels.asset_id }}) is down"
+          description: "Availability check for asset {{ $labels.asset_id }} failed. The preset label records the configured minimum duration."
+
+      - alert: ItsmCheckDown
+        expr: |
+          (
+            probe_success == 0
+            or up{job=~"node|windows"} == 0
+            or (up{job="snmp"} == 0 and on () (up{job="snmp-exporter"} == 1))
+          )
+          and on (asset_id) itsm_monitoring_check_enabled == 1
+          and on (asset_id) itsm_monitoring_check_duration_preset_seconds == 60
+        for: 60s
+        labels:
+          severity: critical
+          preset: "60"
+        annotations: *check_down_notes
+
+      - alert: ItsmCheckDown
+        expr: |
+          (
+            probe_success == 0
+            or up{job=~"node|windows"} == 0
+            or (up{job="snmp"} == 0 and on () (up{job="snmp-exporter"} == 1))
+          )
+          and on (asset_id) itsm_monitoring_check_enabled == 1
+          and on (asset_id) itsm_monitoring_check_duration_preset_seconds == 300
+        for: 300s
+        labels:
+          severity: critical
+          preset: "300"
+        annotations: *check_down_notes
+
+      - alert: ItsmCheckDown
+        expr: |
+          (
+            probe_success == 0
+            or up{job=~"node|windows"} == 0
+            or (up{job="snmp"} == 0 and on () (up{job="snmp-exporter"} == 1))
+          )
+          and on (asset_id) itsm_monitoring_check_enabled == 1
+          and on (asset_id) itsm_monitoring_check_duration_preset_seconds == 900
+        for: 900s
+        labels:
+          severity: critical
+          preset: "900"
+        annotations: *check_down_notes
+
+      # Intermittent behavior on real probe and exporter-scrape transitions,
+      # not synthetic state. `up` only carries asset_id for discovered jobs, so
+      # exporter self-scrape cannot be attributed to an asset.
+      - alert: ItsmCheckFlapping
+        expr: |
+          (
+            changes(probe_success[15m]) > 4
+            or changes(up{job=~"node|windows|snmp"}[15m]) > 4
+          )
+          and on (asset_id) itsm_monitoring_check_enabled == 1
+        for: 0s
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.asset_name }} ({{ $labels.asset_id }}) is flapping"
+          description: "Asset {{ $labels.asset_id }} changed probe state more than 4 times in 15 minutes."
+
+  # Thresholds. One comparison rule per severity and preset covers every
+  # normalized metric (cpu, memory, disk, temperature) plus probe latency,
+  # using the exact values exposed by the configuration endpoint.
+  - name: itsm-thresholds
+    rules:
+      - alert: ItsmThresholdWarning
+        expr: |
+          (
+            label_replace(probe_duration_seconds, "metric", "latency", "", "")
+              > on (asset_id, metric) group_left ()
+              itsm_monitoring_check_threshold{severity="warning"}
+            or itsm:asset_utilization:percent
+              > on (asset_id, metric) group_left ()
+              itsm_monitoring_check_threshold{severity="warning"}
+            or itsm:asset_temperature:celsius
+              > on (asset_id, metric) group_left ()
+              itsm_monitoring_check_threshold{severity="warning"}
+          )
+          and on (asset_id) itsm_monitoring_check_enabled == 1
+          and on (asset_id) itsm_monitoring_check_duration_preset_seconds == 0
+        for: 0s
+        labels:
+          severity: warning
+          preset: "0"
+        annotations: &threshold_warning_notes
+          summary: "{{ $labels.metric }} above warning threshold on {{ $labels.asset_name }} ({{ $labels.asset_id }})"
+          description: "Observed {{ $labels.metric }}={{ $value }} exceeds the configured warning threshold for asset {{ $labels.asset_id }}."
+
+      - alert: ItsmThresholdWarning
+        expr: |
+          (
+            label_replace(probe_duration_seconds, "metric", "latency", "", "")
+              > on (asset_id, metric) group_left ()
+              itsm_monitoring_check_threshold{severity="warning"}
+            or itsm:asset_utilization:percent
+              > on (asset_id, metric) group_left ()
+              itsm_monitoring_check_threshold{severity="warning"}
+            or itsm:asset_temperature:celsius
+              > on (asset_id, metric) group_left ()
+              itsm_monitoring_check_threshold{severity="warning"}
+          )
+          and on (asset_id) itsm_monitoring_check_enabled == 1
+          and on (asset_id) itsm_monitoring_check_duration_preset_seconds == 60
+        for: 60s
+        labels:
+          severity: warning
+          preset: "60"
+        annotations: *threshold_warning_notes
+
+      - alert: ItsmThresholdWarning
+        expr: |
+          (
+            label_replace(probe_duration_seconds, "metric", "latency", "", "")
+              > on (asset_id, metric) group_left ()
+              itsm_monitoring_check_threshold{severity="warning"}
+            or itsm:asset_utilization:percent
+              > on (asset_id, metric) group_left ()
+              itsm_monitoring_check_threshold{severity="warning"}
+            or itsm:asset_temperature:celsius
+              > on (asset_id, metric) group_left ()
+              itsm_monitoring_check_threshold{severity="warning"}
+          )
+          and on (asset_id) itsm_monitoring_check_enabled == 1
+          and on (asset_id) itsm_monitoring_check_duration_preset_seconds == 300
+        for: 300s
+        labels:
+          severity: warning
+          preset: "300"
+        annotations: *threshold_warning_notes
+
+      - alert: ItsmThresholdWarning
+        expr: |
+          (
+            label_replace(probe_duration_seconds, "metric", "latency", "", "")
+              > on (asset_id, metric) group_left ()
+              itsm_monitoring_check_threshold{severity="warning"}
+            or itsm:asset_utilization:percent
+              > on (asset_id, metric) group_left ()
+              itsm_monitoring_check_threshold{severity="warning"}
+            or itsm:asset_temperature:celsius
+              > on (asset_id, metric) group_left ()
+              itsm_monitoring_check_threshold{severity="warning"}
+          )
+          and on (asset_id) itsm_monitoring_check_enabled == 1
+          and on (asset_id) itsm_monitoring_check_duration_preset_seconds == 900
+        for: 900s
+        labels:
+          severity: warning
+          preset: "900"
+        annotations: *threshold_warning_notes
+
+      - alert: ItsmThresholdCritical
+        expr: |
+          (
+            label_replace(probe_duration_seconds, "metric", "latency", "", "")
+              > on (asset_id, metric) group_left ()
+              itsm_monitoring_check_threshold{severity="critical"}
+            or itsm:asset_utilization:percent
+              > on (asset_id, metric) group_left ()
+              itsm_monitoring_check_threshold{severity="critical"}
+            or itsm:asset_temperature:celsius
+              > on (asset_id, metric) group_left ()
+              itsm_monitoring_check_threshold{severity="critical"}
+          )
+          and on (asset_id) itsm_monitoring_check_enabled == 1
+          and on (asset_id) itsm_monitoring_check_duration_preset_seconds == 0
+        for: 0s
+        labels:
+          severity: critical
+          preset: "0"
+        annotations: &threshold_critical_notes
+          summary: "{{ $labels.metric }} above critical threshold on {{ $labels.asset_name }} ({{ $labels.asset_id }})"
+          description: "Observed {{ $labels.metric }}={{ $value }} exceeds the configured critical threshold for asset {{ $labels.asset_id }}."
+
+      - alert: ItsmThresholdCritical
+        expr: |
+          (
+            label_replace(probe_duration_seconds, "metric", "latency", "", "")
+              > on (asset_id, metric) group_left ()
+              itsm_monitoring_check_threshold{severity="critical"}
+            or itsm:asset_utilization:percent
+              > on (asset_id, metric) group_left ()
+              itsm_monitoring_check_threshold{severity="critical"}
+            or itsm:asset_temperature:celsius
+              > on (asset_id, metric) group_left ()
+              itsm_monitoring_check_threshold{severity="critical"}
+          )
+          and on (asset_id) itsm_monitoring_check_enabled == 1
+          and on (asset_id) itsm_monitoring_check_duration_preset_seconds == 60
+        for: 60s
+        labels:
+          severity: critical
+          preset: "60"
+        annotations: *threshold_critical_notes
+
+      - alert: ItsmThresholdCritical
+        expr: |
+          (
+            label_replace(probe_duration_seconds, "metric", "latency", "", "")
+              > on (asset_id, metric) group_left ()
+              itsm_monitoring_check_threshold{severity="critical"}
+            or itsm:asset_utilization:percent
+              > on (asset_id, metric) group_left ()
+              itsm_monitoring_check_threshold{severity="critical"}
+            or itsm:asset_temperature:celsius
+              > on (asset_id, metric) group_left ()
+              itsm_monitoring_check_threshold{severity="critical"}
+          )
+          and on (asset_id) itsm_monitoring_check_enabled == 1
+          and on (asset_id) itsm_monitoring_check_duration_preset_seconds == 300
+        for: 300s
+        labels:
+          severity: critical
+          preset: "300"
+        annotations: *threshold_critical_notes
+
+      - alert: ItsmThresholdCritical
+        expr: |
+          (
+            label_replace(probe_duration_seconds, "metric", "latency", "", "")
+              > on (asset_id, metric) group_left ()
+              itsm_monitoring_check_threshold{severity="critical"}
+            or itsm:asset_utilization:percent
+              > on (asset_id, metric) group_left ()
+              itsm_monitoring_check_threshold{severity="critical"}
+            or itsm:asset_temperature:celsius
+              > on (asset_id, metric) group_left ()
+              itsm_monitoring_check_threshold{severity="critical"}
+          )
+          and on (asset_id) itsm_monitoring_check_enabled == 1
+          and on (asset_id) itsm_monitoring_check_duration_preset_seconds == 900
+        for: 900s
+        labels:
+          severity: critical
+          preset: "900"
+        annotations: *threshold_critical_notes

@@ -1,8 +1,173 @@
+# ITSM deployment - native Prometheus configuration.
+#
+# Monitored assets are discovered from the ITSM HTTP service discovery API.
+# Do not add per-device static targets: adding or changing an asset in ITSM is
+# the only supported way to register a target.
+#
+# External Prometheus installations reuse rules/itsm-rules.yml unchanged and
+# point the same jobs at the ITSM discovery endpoint and exporter addresses
+# routable from their host; see docs/operations.md.
+
 global:
-  scrape_interval: 30s
+  scrape_interval: 60s
+  # Bounded below the smallest supported per-asset preset (30s).
+  scrape_timeout: 10s
   evaluation_interval: 30s
+
+rule_files:
+  - rules/itsm-rules.yml
+
+# Alerts are pushed natively so Alertmanager remains the single authority for
+# grouping, inhibition and silences when it is deployed. Without the
+# monitoring-alertmanager profile Prometheus keeps evaluating and exposing
+# alerts; only notification delivery fails and clients poll the API instead.
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: [alertmanager:9093]
+
 scrape_configs:
   - job_name: prometheus
     static_configs:
       - targets: [localhost:9090]
-# Device exporters and ITSM metric instruments are intentionally deferred.
+
+  # Per-asset monitoring configuration as native series (enabled flags,
+  # threshold values and minimum-duration presets). Threshold comparison rules
+  # read these series; an absent series means "not monitored", so rules stay
+  # silent instead of inventing targets.
+  - job_name: itsm-monitoring
+    metrics_path: /api/v1/monitoring/prometheus-metrics
+    authorization: &discovery-auth
+      type: Bearer
+      credentials_file: /run/secrets/monitoring_discovery_token
+    static_configs:
+      - targets: [backend:8000]
+
+  # SNMP exporter self-metrics gate device-down alerts: if the exporter itself
+  # is unreachable, missing device data is not reported as every switch down.
+  - job_name: snmp-exporter
+    static_configs:
+      - targets: [snmp-exporter:9116]
+
+  - job_name: blackbox-icmp
+    metrics_path: /probe
+    params:
+      module: [icmp]
+    http_sd_configs:
+      - url: http://backend:8000/api/v1/monitoring/discovery?check_type=icmp
+        refresh_interval: 60s
+        authorization: *discovery-auth
+    relabel_configs: &blackbox-relabel
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115
+      # Optional per-installation exporter address from ITSM. Only a non-empty
+      # label overrides the shared exporter service.
+      - source_labels: [exporter_address]
+        regex: (.+)
+        target_label: __address__
+      # Honor the configured per-asset interval for supported presets only.
+      # `__scrape_interval__` is a native Prometheus relabel target that
+      # overrides this target's scrape interval. Absent/unsupported values
+      # keep the job interval; the 10s global timeout stays below 30s.
+      - source_labels: [interval_seconds]
+        regex: "(30|60|300|900)"
+        target_label: __scrape_interval__
+        replacement: "${1}s"
+
+  - job_name: blackbox-http
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    http_sd_configs:
+      - url: http://backend:8000/api/v1/monitoring/discovery?check_type=http
+        refresh_interval: 60s
+        authorization: *discovery-auth
+    relabel_configs: *blackbox-relabel
+
+  - job_name: blackbox-tcp
+    metrics_path: /probe
+    params:
+      module: [tcp_connect]
+    http_sd_configs:
+      - url: http://backend:8000/api/v1/monitoring/discovery?check_type=tcp
+        refresh_interval: 60s
+        authorization: *discovery-auth
+    relabel_configs: *blackbox-relabel
+
+  - job_name: blackbox-dns
+    metrics_path: /probe
+    params:
+      module: [dns_udp]
+    http_sd_configs:
+      - url: http://backend:8000/api/v1/monitoring/discovery?check_type=dns
+        refresh_interval: 60s
+        authorization: *discovery-auth
+    relabel_configs: *blackbox-relabel
+
+  # SNMP modules and credential references come from the target labels, never
+  # from per-device files; credentials are merged from the operator-supplied
+  # auths secret mounted as a second exporter config file.
+  - job_name: snmp
+    # snmp_exporter serves probes at /snmp (Blackbox uses /probe).
+    metrics_path: /snmp
+    params:
+      module: [if_mib]
+    http_sd_configs:
+      - url: http://backend:8000/api/v1/monitoring/discovery?check_type=snmp
+        refresh_interval: 60s
+        authorization: *discovery-auth
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - source_labels: [module]
+        regex: (.+)
+        target_label: __param_module
+      - source_labels: [auth]
+        regex: (.+)
+        target_label: __param_auth
+      - target_label: __address__
+        replacement: snmp-exporter:9116
+      # Optional per-installation exporter address from ITSM. Only a non-empty
+      # label overrides the shared exporter service.
+      - source_labels: [exporter_address]
+        regex: (.+)
+        target_label: __address__
+      # Native per-target interval from the supported configuration presets.
+      - source_labels: [interval_seconds]
+        regex: "(30|60|300|900)"
+        target_label: __scrape_interval__
+        replacement: "${1}s"
+
+  # node_exporter and windows_exporter are scraped directly: the discovered
+  # target is the exporter address on the monitored host. A configured
+  # exporter_address overrides the scrape address while instance keeps the
+  # real target.
+  - job_name: node
+    http_sd_configs:
+      - url: http://backend:8000/api/v1/monitoring/discovery?check_type=node
+        refresh_interval: 60s
+        authorization: *discovery-auth
+    relabel_configs: &direct-relabel
+      - source_labels: [__address__]
+        target_label: instance
+      - source_labels: [exporter_address]
+        regex: (.+)
+        target_label: __address__
+      # Native per-target interval from the supported configuration presets.
+      - source_labels: [interval_seconds]
+        regex: "(30|60|300|900)"
+        target_label: __scrape_interval__
+        replacement: "${1}s"
+
+  - job_name: windows
+    http_sd_configs:
+      - url: http://backend:8000/api/v1/monitoring/discovery?check_type=windows
+        refresh_interval: 60s
+        authorization: *discovery-auth
+    relabel_configs: *direct-relabel

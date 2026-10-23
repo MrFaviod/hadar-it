@@ -25,7 +25,21 @@ x-backend: &backend
     ITSM_AGENT_OPENAI_BASE_URL: ${ITSM_AGENT_OPENAI_BASE_URL:-}
     OPENAI_API_KEY: ${OPENAI_API_KEY:-}
     ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-    ITSM_PROMETHEUS_URL: ${ITSM_PROMETHEUS_URL:-}
+    # Monitoring. The local Prometheus profile is the default engine; an
+    # external instance is selected with ITSM_PROMETHEUS_URL. Blank optional
+    # values mean "not configured": inventory-only startup stays valid.
+    ITSM_PROMETHEUS_URL: ${ITSM_PROMETHEUS_URL:-http://prometheus:9090}
+    ITSM_PROMETHEUS_TOKEN: ${ITSM_PROMETHEUS_TOKEN:-}
+    ITSM_ALERTMANAGER_URL: ${ITSM_ALERTMANAGER_URL:-}
+    ITSM_ALERTMANAGER_TOKEN: ${ITSM_ALERTMANAGER_TOKEN:-}
+    ITSM_MONITORING_INGEST_TOKEN: ${ITSM_MONITORING_INGEST_TOKEN:-}
+    ITSM_MONITORING_DISCOVERY_TOKEN: ${ITSM_MONITORING_DISCOVERY_TOKEN:-}
+    ITSM_MONITORING_HTTP_TIMEOUT_SECONDS: ${ITSM_MONITORING_HTTP_TIMEOUT_SECONDS:-10}
+    ITSM_MONITORING_PUBLIC_URL: ${ITSM_MONITORING_PUBLIC_URL:-http://localhost:18080}
+    ITSM_MONITORING_POLL_SECONDS: ${ITSM_MONITORING_POLL_SECONDS:-60}
+    ITSM_NOTIFICATION_RETENTION_DAYS: ${ITSM_NOTIFICATION_RETENTION_DAYS:-90}
+    # JSON map of Apprise reference -> full URL/token, supplied externally.
+    ITSM_MONITORING_SECRETS: ${ITSM_MONITORING_SECRETS:-{}}
     ITSM_MEILISEARCH_URL: ${ITSM_MEILISEARCH_URL:-}
     ITSM_SERVICE_REDIS_URL: ${ITSM_SERVICE_REDIS_URL:-}
   volumes:
@@ -50,7 +64,7 @@ services:
 
   worker:
     <<: *backend
-    command: [python, -m, huey.bin.huey_consumer, itsm.tasks.runtime.huey, -w, "1", -k, thread]
+    command: [python, -m, huey.bin.huey_consumer, itsm.tasks.runtime.huey, -w, "1", "-k", thread]
     stop_grace_period: 30s
 
   migrate:
@@ -110,6 +124,9 @@ services:
     volumes: [search-data:/meili_data]
     restart: unless-stopped
 
+  # Optional metric engine. Persistent TSDB with configurable retention; the
+  # discovery bearer token is injected as a Compose secret from the external
+  # environment, never committed. Rules are a fixed versioned bundle.
   prometheus:
     image: prom/prometheus:v3.14.0@sha256:5ce7540c3c00ef4ab0c9d2c995c6a5b9c421f44b4a115d97a2c7af3b1c21cbb0
     profiles: [monitoring]
@@ -119,8 +136,97 @@ services:
       - --storage.tsdb.retention.time=${ITSM_PROMETHEUS_RETENTION:-7d}
     volumes:
       - ./deploy/prometheus.yml:/etc/prometheus/prometheus.yml:ro,Z
+      - ./deploy/prometheus-rules.yml:/etc/prometheus/rules/itsm-rules.yml:ro,Z
       - prometheus-data:/prometheus
+    secrets: [monitoring_discovery_token]
     ports: ["127.0.0.1:${ITSM_PROMETHEUS_PORT:-19090}:9090"]
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    read_only: true
+    tmpfs: [/tmp]
+    restart: unless-stopped
+
+  # Optional prober for ICMP, HTTP(S), TCP and DNS checks.
+  blackbox-exporter:
+    image: prom/blackbox-exporter:v0.29.1@sha256:ea1c7aa3ef3f307cd03e85f34abb604478ccb90b567fc690da0cd9776da76b13
+    profiles: [monitoring-blackbox]
+    command: [--config.file=/etc/blackbox_exporter/blackbox.yml]
+    volumes:
+      - ./deploy/blackbox.yml:/etc/blackbox_exporter/blackbox.yml:ro,Z
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    cap_add: [NET_RAW]
+    read_only: true
+    tmpfs: [/tmp]
+    restart: unless-stopped
+
+  # Optional SNMP prober for switches, gateways, routers and UPS devices.
+  # Credentials are projected from the external environment as a Compose
+  # secret file; the committed modules file has no auths and cannot fake one.
+  snmp-exporter:
+    image: prom/snmp-exporter:v0.30.1@sha256:e5fd5e8b43ace6c088fe9bf0b37b7fff0e04380bee352be7ec41b853a4dd5859
+    profiles: [monitoring-snmp]
+    command:
+      - --config.file=/etc/snmp_exporter/snmp.yml
+      - --config.file=/run/secrets/snmp_auths.yml
+    volumes:
+      - ./deploy/snmp.yml:/etc/snmp_exporter/snmp.yml:ro,Z
+    secrets:
+      - source: snmp_auths
+        target: snmp_auths.yml
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    read_only: true
+    tmpfs: [/tmp]
+    restart: unless-stopped
+
+  # Optional host metrics for this Docker host. Host networking and PID view
+  # are required for the network/process namespace to be the host itself, not
+  # the container's; processes are still only observable, never modified.
+  # Bind the loopback/interface you need and firewall port 9100.
+  node-exporter:
+    image: prom/node-exporter:v1.12.1@sha256:1b4e4438faca4dd7e001dd445d161a4a2091b0fededa84093b3a8dfeae1f1be0
+    profiles: [monitoring-node]
+    command:
+      - --path.procfs=/host/proc
+      - --path.sysfs=/host/sys
+      - --path.rootfs=/host/root
+      - --web.listen-address=:9100
+      - --collector.filesystem.mount-points-exclude=^/(dev|proc|sys|var/lib/docker/.+|var/lib/kubelet/.+)($$|/)
+    network_mode: host
+    pid: host
+    volumes:
+      # Read-only host views; never relabel host paths with :z/:Z.
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/host/root:ro
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    read_only: true
+    tmpfs: [/tmp]
+    restart: unless-stopped
+
+  # Optional native Alertmanager. When enabled, set ITSM_ALERTMANAGER_URL to
+  # http://alertmanager:9093 so ITSM delegates grouping, inhibition and
+  # silences; without it the adapter polls Prometheus and keeps local
+  # suppression for notifications only.
+  alertmanager:
+    image: prom/alertmanager:v0.34.1@sha256:e9733bafb1bdef9b00e25a21f8f99dc26a22224bf16641ad754d1649f4c3357a
+    profiles: [monitoring-alertmanager]
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+      - --cluster.listen-address=
+      - --web.listen-address=:9093
+    volumes:
+      - ./deploy/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro,Z
+      - alertmanager-data:/alertmanager
+    secrets: [monitoring_ingest_token]
+    ports: ["127.0.0.1:${ITSM_ALERTMANAGER_PORT:-19093}:9093"]
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    read_only: true
+    tmpfs: [/tmp]
     restart: unless-stopped
 
 volumes:
@@ -131,3 +237,14 @@ volumes:
   redis-data:
   search-data:
   prometheus-data:
+  alertmanager-data:
+
+# Bearer tokens are supplied through the external environment and materialized
+# only inside the containers that need them. No secret file is committed.
+secrets:
+  monitoring_discovery_token:
+    environment: ITSM_MONITORING_DISCOVERY_TOKEN
+  monitoring_ingest_token:
+    environment: ITSM_MONITORING_INGEST_TOKEN
+  snmp_auths:
+    environment: ITSM_SNMP_AUTHS
