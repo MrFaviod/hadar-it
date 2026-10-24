@@ -44,6 +44,16 @@ See [Phase 10 implementation](odd/tasks/phase-10.md),
 [executed validation and limits](docs/phase-10-validation.md), and
 [optional-service configuration](docs/operations.md).
 
+## Phase 11 integration and operational validation
+
+The [Phase 11 evidence and limitations](docs/phase-11-validation.md) distinguishes
+executed checks from missing proof. Actual SQLite/PostgreSQL/MariaDB integration,
+native recovery, original-interface flows, worker jobs and shared REST/agent/MCP
+authorization are checked. Microsoft SQL Server remains unverified without an
+approved runtime and its driver prerequisites. Confirmed corrections stay localized:
+import transaction occupancy, directory states, warranty queries/refresh and shared
+Docker-volume SELinux labeling. This remains pre-alpha, not a production certification.
+
 ## Components
 
 Three independent Git repositories live here; root Git ignores the two components. Clone/back up each independently. No submodules or release pipeline are implied.
@@ -58,9 +68,12 @@ Three independent Git repositories live here; root Git ignores the two component
 
 ## Start locally
 
-The implemented inventory prioritizes verification against the integrated local database, not external SQL engines. Use persistent
-SQLite with the existing named volume; optional local PostgreSQL remains available but is
-not required. Requires Docker Engine + Compose; no `.env` file is created or read.
+Persistent SQLite needs no separate database service. Local PostgreSQL and externally
+managed SQL are alternative installation modes; consult the current Phase 11 matrix
+before selecting an engine. Requires Docker Engine + Compose and an operator-reserved
+per-installation `ITSM_SELINUX_LEVEL`, exported before the commands below; see
+[shared-volume security](docs/operations.md#reserve-the-shared-volume-selinux-domain).
+No `.env` file is created or read.
 
 ```bash
 export ITSM_DATABASE_URL=sqlite:////data/app/itsm.db
@@ -74,7 +87,7 @@ export ITSM_AUTH_ORIGIN=http://127.0.0.1:18080 ITSM_AUTH_COOKIE_SECURE=false
 docker compose --env-file /dev/null up -d --wait backend worker frontend
 ```
 
-- Frontend: `http://127.0.0.1:18080` (identity, asset core, organization, topology and redundancy; unrelated unimplemented modules remain prototypes).
+- Frontend: `http://127.0.0.1:18080`; implemented domains use authenticated canonical services. Explicitly labeled future/demo integrations are not functional claims.
 - API/OpenAPI: `http://127.0.0.1:18000/docs`.
 - API health: `/api/v1/health/live` and `/api/v1/health/ready`.
 - Worker: separate process, same backend image, shared persistent local queue volume. Default SQLite queue requires no Redis.
@@ -102,7 +115,7 @@ curl --fail http://127.0.0.1:18000/api/v1/health/ready
 
 For development run the API with the exact browser origin and explicit local HTTP cookie override, then `ITSM_DEV_API_URL=http://127.0.0.1:8000 npm --prefix frontend run dev`. Choose an unused API port when needed; never replace an existing host service. A bare Vite production preview has no API proxy: use the Nginx Compose frontend for full login checks.
 
-See `odd/tasks/phase-2.md` and `odd/tasks/phase-1.md` for observed command exits and the tested SQL/queue matrix. Planned engine support is not the same as a verified live server. No production deployment, push, tag or release is performed by local verification.
+See [Phase 11](docs/phase-11-validation.md) for the current executed SQL/queue matrix and operational limits; earlier phase records remain historical evidence. Planned engine support is not a verified live server. No production deployment, push, tag or release is performed by local verification.
 
 ## Development rules
 
