@@ -26,7 +26,12 @@ The human selected documentation of variables instead of creating `.env` / `.env
 | `ITSM_TASK_RETRIES` / `ITSM_TASK_RETRY_DELAY_SECONDS` | `2` / `1`; bounded demo retry policy |
 | `ITSM_DEMO_PERIODIC_MINUTES` | `0` disables the periodic demo; 1–60 enables a worker schedule |
 | `ITSM_LOG_LEVEL` | `INFO`; structured application/worker logs |
-| `ITSM_MEILISEARCH_URL` / `ITSM_SERVICE_REDIS_URL` | Optional service descriptors; not readiness dependencies |
+| `ITSM_MEILISEARCH_URL` | Empty selects canonical SQL search. Optional HTTP(S) engine base URL; no embedded credentials, query or fragment. Engine loss falls back to SQL. |
+| `ITSM_MEILISEARCH_API_KEY` | Optional secret for an external engine; Compose defaults to externally supplied `ITSM_MEILI_MASTER_KEY` for its search profile. |
+| `ITSM_MEILISEARCH_HTTP_TIMEOUT_SECONDS` | `5`; bounded 1–60 seconds for engine requests. |
+| `ITSM_SEARCH_INDEX_NAME` | `itsm_entities`; endpoint-safe index name, 1–64 characters. |
+| `ITSM_SEARCH_SYNC_BATCH_SIZE` | `100`; bounded 1–500 durable outbox rows per Huey synchronization batch. |
+| `ITSM_SERVICE_REDIS_URL` | Optional descriptor, not a readiness dependency. |
 | `ITSM_PROMETHEUS_URL` | Engine base URL used by the monitoring adapter. Compose default `http://prometheus:9090` for the local profile; set an external HTTPS URL instead. An empty or unreachable engine is reported as unavailable, never as every device down. Credentials/query/fragment are rejected; use the token variable. |
 | `ITSM_PROMETHEUS_TOKEN` | Optional bearer for an external Prometheus API. Secret; never in URLs, logs or Git. |
 | `ITSM_ALERTMANAGER_URL` | Empty disables native Alertmanager mode. Set `http://alertmanager:9093` with the local profile, or the external address. |
@@ -43,13 +48,13 @@ The human selected documentation of variables instead of creating `.env` / `.env
 | `ITSM_PROMETHEUS_PORT` | Loopback `19090` |
 | `ITSM_PROMETHEUS_RETENTION` | `7d`; valid Prometheus retention duration; ignored by an external engine |
 | `ITSM_ALERTMANAGER_PORT` | Loopback `19093` for the optional local Alertmanager |
-| `ITSM_MEILI_MASTER_KEY` | Required only for optional search profile, externally supplied; functional integration deferred |
+| `ITSM_MEILI_MASTER_KEY` | Required only for the optional local search profile, externally supplied; forwarded to the API/worker as the engine API key unless explicitly overridden. |
 
 ### Integrated database first
 
-For the current phase use the persistent SQLite instructions below. Do not start an
-external-engine validation matrix or install Meilisearch to search inventory. Existing
-optional PostgreSQL configuration is retained, not a requirement for the vertical slice.
+The default remains persistent SQL search with no extra service. An installation
+may opt into Meilisearch for relevance; SQL still rehydrates and authorizes every
+hit, and outages retain SQL search. Existing PostgreSQL configuration is optional.
 
 ### Local PostgreSQL (optional)
 
@@ -96,6 +101,14 @@ docker compose --env-file /dev/null --profile search up -d meilisearch
 ```
 
 Selecting the Redis profile alone does **not** change the queue; set `ITSM_TASK_STORAGE=redis` and its URL, then recreate API/worker intentionally. Likewise PostgreSQL queue uses `ITSM_TASK_STORAGE=postgres` plus its own DSN. Queue tables/storage lifecycle belongs to Huey, separate from main Alembic migrations.
+
+For optional search, set `ITSM_MEILISEARCH_URL=http://meilisearch:7700` and supply
+the key externally before intentionally recreating API/worker. The real Huey
+consumer processes transactional search outbox rows and bounded retries. An
+administrator can inspect `/api/v1/search/status` and request `POST /search/rebuild`
+or `/search/sync` using the existing Origin/CSRF guards. Rebuild prepares a temporary
+index and swaps only after successful indexing; a failed rebuild keeps the prior
+index. No engine is needed for SQL search, favorites or saved views.
 
 ### Monitoring topology
 

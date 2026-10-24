@@ -28,6 +28,22 @@ Attachment SQL metadata and bytes must be backed up together; see
 [operations](docs/operations.md#backups-and-recovery).
 No deployment or existing-container change is implied by this configuration.
 
+## Phase 10 operational integration
+
+The original Vue NOC Dashboard, MapLibre explorer, relationship graph and Ctrl+K
+palette now use canonical authorized services. User workspace state is durable;
+installation branding is shared while light/dark/automatic mode stays personal.
+Appearance presets export real self-contained ZIPs with staged preview, explicit
+application, generic restore and rollback.
+
+SQL search is the default. Optional Meilisearch adds relevance with a durable
+outbox, Huey synchronization/retries and rebuild; results are reauthorized from
+SQL and engine loss falls back to SQL. It is not a primary data source.
+
+See [Phase 10 implementation](odd/tasks/phase-10.md),
+[executed validation and limits](docs/phase-10-validation.md), and
+[optional-service configuration](docs/operations.md).
+
 ## Components
 
 Three independent Git repositories live here; root Git ignores the two components. Clone/back up each independently. No submodules or release pipeline are implied.
@@ -64,10 +80,10 @@ docker compose --env-file /dev/null up -d --wait backend worker frontend
 - Worker: separate process, same backend image, shared persistent local queue volume. Default SQLite queue requires no Redis.
 - Local PostgreSQL is optional: set `ITSM_DATABASE_URL` for external SQL and omit its profile. For local persistent SQLite main data use `sqlite:////data/app/itsm.db`; queue is a different file/volume.
 
-Profiles `redis`, `search` and `monitoring` opt into Redis, Meilisearch and Prometheus. None
-is required for basic inventory/search. Device exporters, advanced search, notifications
-and PDF remain later phases. The integrated Pydantic AI agent and selected FastMCP tools
-reuse the inventory service and F2 identities; no multiagent orchestrator is introduced.
+Profiles `redis`, `search` and `monitoring` opt into Redis, Meilisearch and Prometheus.
+None is required for basic inventory or SQL search. Monitoring uses the existing
+Prometheus adapter. Pydantic AI and FastMCP reuse canonical services and effective
+identity permissions; no multiagent orchestrator is introduced.
 
 The conversation route uses a server-configured model, not browser API keys. Without
 `ITSM_AGENT_MODEL` and its provider credentials, the UI reports agent unavailability;
