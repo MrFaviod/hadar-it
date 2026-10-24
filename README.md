@@ -49,8 +49,9 @@ See [Phase 10 implementation](odd/tasks/phase-10.md),
 The [Phase 11 evidence and limitations](docs/phase-11-validation.md) distinguishes
 executed checks from missing proof. Actual SQLite/PostgreSQL/MariaDB integration,
 native recovery, original-interface flows, worker jobs and shared REST/agent/MCP
-authorization are checked. Microsoft SQL Server remains unverified without an
-approved runtime and its driver prerequisites. Confirmed corrections stay localized:
+authorization are checked. SQL Server is preparation-only by user decision because
+non-production licenses are unavailable; it remains unvalidated and does not block
+Phase 11 closure. Confirmed corrections stay localized:
 import transaction occupancy, directory states, warranty queries/refresh and shared
 Docker-volume SELinux labeling. This remains pre-alpha, not a production certification.
 
