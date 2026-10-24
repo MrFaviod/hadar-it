@@ -1,6 +1,6 @@
 # Infrastructure and identity operations
 
-Run commands from `asset/`. Root Compose references the two independent component checkouts; cloning root alone does not fetch them. Read backend/README.md for API/task payloads and native Python commands. The React/Vue renderer uses real FastAPI login, users, roles and sessions. Phase 3 adds basic SQL inventory and conversation; other unimplemented domain data remains prototype-only. Current work prioritizes the integrated persistent database, not external engine certification.
+Run commands from `asset/`. Root Compose references the two independent component checkouts; cloning root alone does not fetch them. Read backend/README.md for API/task payloads and native Python commands. The original React/Vue renderer uses canonical authenticated services for implemented modules. Explicitly labeled future/demo integrations are not operational features. See [Phase 11 validation](phase-11-validation.md) for executed flows, SQL compatibility, recovery evidence and remaining limitations; this pre-alpha is not production-certified.
 
 ## Configuration without secret files
 
@@ -11,6 +11,7 @@ The human selected documentation of variables instead of creating `.env` / `.env
 | `ITSM_AUTH_ORIGIN` | Exact browser origin; Compose default http://localhost:18080. Match the browser hostname. |
 | `ITSM_AUTH_COOKIE_SECURE` | true; explicitly false only for isolated/local HTTP. Use HTTPS otherwise. |
 | `ITSM_BOOTSTRAP_PASSWORD` | External initial password for explicit administrator CLI; no default account. |
+| `ITSM_SELINUX_LEVEL` | Required installation-specific SELinux MCS level shared by API, worker, migrations and bootstrap. Reserve distinct categories per installation; see below. Not a credential. |
 | `ITSM_AGENT_MODEL` | Empty disables inference; server-selected `provider:model`, e.g. `openai:gpt-4.1-mini` or `anthropic:claude-sonnet-4-5`. |
 | `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` | Provider-specific external credential; never browser input, committed configuration or a tool argument. |
 | `ITSM_AGENT_OPENAI_BASE_URL` | Optional server-owned OpenAI-compatible endpoint; never accepted from chat. |
@@ -49,6 +50,32 @@ The human selected documentation of variables instead of creating `.env` / `.env
 | `ITSM_PROMETHEUS_RETENTION` | `7d`; valid Prometheus retention duration; ignored by an external engine |
 | `ITSM_ALERTMANAGER_PORT` | Loopback `19093` for the optional local Alertmanager |
 | `ITSM_MEILI_MASTER_KEY` | Required only for the optional local search profile, externally supplied; forwarded to the API/worker as the engine API key unless explicitly overridden. |
+
+### Reserve the shared-volume SELinux domain
+
+Before **any** Compose command, have the host operator reserve an unused MCS level
+for this installation and export it as `ITSM_SELINUX_LEVEL`. For example, a level
+has the shape `s0:c491,c492`; those categories were used only by the isolated
+verification, **not allocated as a universal deployment default**. Separate
+installations must use distinct reserved levels. Keep the same value in every
+administrative session and external configuration mechanism, including later
+`run --rm migrate`, bootstrap and update commands. Compose fails with an actionable
+message if it is absent rather than guessing a shared category allocation.
+
+API, worker and one-shot commands share application, queue and opaque-file named
+volumes. Docker's independent private labels made fresh installs appear healthy
+while the worker could not read the queue. The backend anchor therefore gives
+these cooperating containers the same MCS level, retaining SELinux type
+enforcement, dropped capabilities and `no-new-privileges`. Do not disable SELinux,
+add bind-only `:z`/`:Z` to named volumes or relabel host directories to hide this.
+An operator changing an existing installation's allocation must coordinate all
+consumers; do not run differently labelled one-shot containers against live volumes.
+
+After installation and after a late migration, execute a real authenticated task
+and verify its completed result. Readiness alone does not prove that the worker
+can access shared queue storage. See the Phase11 report for the fresh-volume and
+cross-consumer roundtrip evidence.
+
 
 ### Integrated database first
 
@@ -90,7 +117,7 @@ export ITSM_AUTH_ORIGIN=http://127.0.0.1:18080 ITSM_AUTH_COOKIE_SECURE=false
 docker compose --env-file /dev/null up -d --wait backend worker frontend
 ```
 
-SQLite main data persists in `app-data`; task queue/results in `task-data`. These are separate files and volumes. Both backend mounts use lowercase `:z`: API, migration and worker intentionally share their SELinux label. Do not substitute private `:Z` or disable SELinux. A private MCS label can make SQLite fail with `unable to open database file` despite correct UID/mode, depending on which container starts first. Queue SQLite must remain local to one Docker host, shared between API and worker, not NFS or a multi-host cluster. The default worker has one thread/process; scale only after testing queue/storage and business idempotency. Main SQL dialect configuration is not proof of live engine compatibility; consult the backend validation matrix.
+SQLite main data persists in `app-data`; task queue/results in `task-data`; opaque files in `attachment-data`. These are Docker-managed named volumes, shared by API, migration and worker, without bind-only `:z`/`:Z` suffixes. All consumers must retain the installation's reserved `ITSM_SELINUX_LEVEL` as described above. Preserve SELinux labels on actual project bind mounts; never relabel host `/proc`, `/sys` or `/`. Queue SQLite must remain local to one Docker host, shared between API and worker, not NFS or a multi-host cluster. The default worker has one thread/process; scale only after testing queue/storage and business idempotency. Main SQL dialect configuration is not proof of live engine compatibility; consult the backend validation matrix.
 
 ### Optional services
 
@@ -303,12 +330,10 @@ the existing worker schedule.
   queries. Periods are UTC and bounded (24h/7d/30d, at most 300 points per series);
   provenance is the engine plus the queried period.
 
-Meilisearch's profile reserves infrastructure only; basic inventory search uses SQLAlchemy
-through an internal search interface. Casbin evaluates policies from owned SQL storage.
-Phase 8 implements Apprise delivery through the internal notification adapter described
-above. Phase 9 uses WeasyPrint for PDFs and Segno for QR codes in the same API/worker
-image; advanced search remains deferred. Pydantic AI and FastMCP reuse the canonical
-business services rather than separate implementations.
+Optional Meilisearch is implemented behind the internal search adapter; SQL remains
+the source of truth and the outage fallback. Casbin evaluates policies from owned SQL
+storage. Apprise, WeasyPrint, Pydantic AI and FastMCP use their existing narrow adapters
+and canonical authorized services. No separate business implementation is introduced.
 
 ### Reports, QR codes and labels
 
@@ -402,11 +427,15 @@ Images use exact version tags and registry digests, not `latest`. Dependencies a
 ## Backups and recovery
 
 - PostgreSQL: run `pg_dump -Fc` using your approved credentials to a protected destination. Check `pg_restore --list`, then rehearse restoration to a fresh database and run migrations/readiness. External database backups belong to the external operator; local Docker volumes are not backups.
+- MariaDB: use `mariadb-dump --single-transaction` for transactional tables with approved external credentials, then import into a fresh database using `mariadb`. Coordinate schema changes and file uploads with the SQL snapshot. Run migrations/readiness and authenticated checks after restore. Phase 11 rehearsed native PostgreSQL and MariaDB restoration into separate disposable databases.
+- SQL Server: use the database operator's native full backup/restore procedure, including encryption keys/certificates where configured. This environment did not execute SQL Server installation or restoration; do not infer compatibility from the SQLAlchemy URL or another engine's results.
 - SQLite main DB: use SQLite's online backup API/`.backup`, not a casual copy of a live WAL database. For a cold file backup, stop the owned API/worker first and include a consistent database/WAL state.
 - Huey SQLite: pause this workspace's API enqueue/worker, back up the entire queue volume consistently; restoring it may replay jobs. Phase 6 jobs use durable per-row receipts in main SQL to avoid replaying successful rows. Do not restore queue state independently of related business data without considering duplicate effects.
 - Attachments: back up `attachment-data` together with a consistent main SQL snapshot. SQL stores metadata and opaque blob keys, not file bytes. Restoring only SQL or only the volume is incomplete. Coordinate uploads/deletions during backup and rehearse authenticated downloads after restoring to isolated state. Do not delete unknown blobs as an improvised cleanup operation; interrupted writes may leave unreferenced objects requiring an explicitly authorized reconciliation.
 - Optional Redis: persist AOF and back up consistently using Redis procedures. Prometheus: back up its owned `prometheus-data` volume cold (stop the service or snapshot the filesystem) or use its supported TSDB procedure; retention is not a backup. Alertmanager state (silences and notification log) lives in `alertmanager-data`; back it up separately. Notification outbox, inbox and delivery history live in main SQL and follow the SQL backup procedure. Restoring metrics or Alertmanager state is independent of inventory availability.
 - Back up root/frontend/backend repositories separately, external settings and named volumes. Never commit backup files or secrets.
+- Appearance presets, logo metadata, published appearance and integration settings are in main SQL; logo/document bytes are in the opaque attachment store. Restore both consistently. Reapply external origins/base URLs, cookie policy, provider credentials, client credentials, notification references/tokens and engine credentials through the approved secret mechanism. SQL/files do not recover externally managed secrets automatically. Do not rotate or disclose them during a rehearsal.
+- Meilisearch is derived state: after SQL/files and current authorization are restored, request the guarded search rebuild and observe its terminal result. Temporary-index swap preserves the prior index on failure; SQL fallback remains usable. Its volume is optional for recovery, not the canonical inventory backup.
 - Rehearse recovery in a new isolated Compose project/volumes before replacing production. No backup/restore against existing server services is performed by this phase.
 
 ## Checks and inspection

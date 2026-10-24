@@ -53,11 +53,15 @@ x-backend: &backend
     ITSM_SEARCH_SYNC_BATCH_SIZE: ${ITSM_SEARCH_SYNC_BATCH_SIZE:-100}
     ITSM_SERVICE_REDIS_URL: ${ITSM_SERVICE_REDIS_URL:-}
   volumes:
-    # Shared between API, migration and worker: lowercase z avoids private MCS labels.
-    - app-data:/data/app:z
-    - task-data:/data/tasks:z
-    - attachment-data:/data/attachments:z
-  security_opt: [no-new-privileges:true]
+    # Docker-managed named volumes are shared by API, migration and worker.
+    - app-data:/data/app
+    - task-data:/data/tasks
+    - attachment-data:/data/attachments
+  security_opt:
+    - no-new-privileges:true
+    # Reserve one distinct level per installation; every shared-volume consumer
+    # must retain it, including later migration and bootstrap commands.
+    - label=level:${ITSM_SELINUX_LEVEL:?Reserve an installation-specific SELinux MCS level before running Compose}
   cap_drop: [ALL]
   restart: unless-stopped
 
