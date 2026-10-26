@@ -93,7 +93,7 @@ docker compose --env-file /dev/null build backend frontend
 docker compose --env-file /dev/null run --rm migrate
 # Supply ITSM_BOOTSTRAP_PASSWORD externally; choose account details:
 docker compose --env-file /dev/null run --rm -e ITSM_BOOTSTRAP_PASSWORD backend \
-  python -m itsm.identity.cli bootstrap-admin --username YOUR_USERNAME --name 'Your administrator'
+  python -m itsm.identity.cli bootstrap-superadmin --username YOUR_USERNAME --name 'Your installation owner'
 # Only for local plain HTTP; production must retain secure cookies with HTTPS:
 export ITSM_AUTH_ORIGIN=http://127.0.0.1:18080 ITSM_AUTH_COOKIE_SECURE=false
 docker compose --env-file /dev/null up -d --wait backend worker frontend
@@ -111,13 +111,58 @@ docker compose --env-file /dev/null build backend frontend
 docker compose --env-file /dev/null run --rm migrate
 # Supply ITSM_BOOTSTRAP_PASSWORD externally; choose account details:
 docker compose --env-file /dev/null run --rm -e ITSM_BOOTSTRAP_PASSWORD backend \
-  python -m itsm.identity.cli bootstrap-admin --username YOUR_USERNAME --name 'Your administrator'
+  python -m itsm.identity.cli bootstrap-superadmin --username YOUR_USERNAME --name 'Your installation owner'
 # Only for local plain HTTP; production must retain secure cookies with HTTPS:
 export ITSM_AUTH_ORIGIN=http://127.0.0.1:18080 ITSM_AUTH_COOKIE_SECURE=false
 docker compose --env-file /dev/null up -d --wait backend worker frontend
 ```
 
 SQLite main data persists in `app-data`; task queue/results in `task-data`; opaque files in `attachment-data`. These are Docker-managed named volumes, shared by API, migration and worker, without bind-only `:z`/`:Z` suffixes. All consumers must retain the installation's reserved `ITSM_SELINUX_LEVEL` as described above. Preserve SELinux labels on actual project bind mounts; never relabel host `/proc`, `/sys` or `/`. Queue SQLite must remain local to one Docker host, shared between API and worker, not NFS or a multi-host cluster. The default worker has one thread/process; scale only after testing queue/storage and business idempotency. Main SQL dialect configuration is not proof of live engine compatibility; consult the backend validation matrix.
+
+### Installation ownership and controlled system operations
+
+The initial account is a **Superadmin**, the installation's operational owner.
+**Admin** retains business administration but has no `system.*` authority; **User**
+is read-only by default and may receive specific business grants. All transports
+use the same persisted authorization, including MCP and delegated agents. An
+Admin cannot promote itself, grant reserved permissions or alter a higher-privilege
+target. Existing administrators are not silently promoted by migration. After
+upgrading an existing installation with no active owner, the operator explicitly
+selects one existing active human account:
+
+```bash
+docker compose --env-file /dev/null run --rm backend \
+  python -m itsm.identity.cli adopt-superadmin --username EXISTING_OWNER_USERNAME
+```
+
+This installation-only command is not a web API; it refuses an installation that
+already has an active owner. Preserve the last active owner. See
+`backend/docs/identity.md` for account and delegated-machine administration.
+
+The optional executor runs **outside application containers**, under an operator-
+chosen least-privilege account. It accepts authenticated fixed actions only:
+`deployment.status`, `update.prepare` and `backup.create`. ITSM authorizes and audits
+each operation; the executor's immutable action configuration chooses the actual
+executable. Neither chat prompts nor HTTP/MCP tool arguments supply a command,
+path, endpoint, credential or release URL. No Docker socket, host filesystem mount,
+privileged container or arbitrary host shell is granted to ITSM or its agents.
+
+Supply `ITSM_SYSTEM_EXECUTOR_URL`, `ITSM_SYSTEM_EXECUTOR_TOKEN` and optionally
+`ITSM_SYSTEM_EXECUTOR_TIMEOUT_SECONDS` externally. The shared Compose environment
+forwards these to backend/worker/migration processes. For a host-side executor,
+the existing `host.docker.internal` gateway requires an authenticated Docker-facing
+listener or proxy, not a host-loopback-only listener. Use TLS for non-loopback
+transport and restrict network access. Without a reachable configured executor,
+operations report **unavailable**, never successful backup or update.
+
+The runnable executor and exact action/result contract are documented in
+`backend/docs/system-operations.md`. Production scripts, supported database backup
+tools/credentials, coordinated SQL-and-attachment consistency, retention/destination,
+trusted pinned release preparation and recovery rehearsal are installation-specific
+integrations. Update preparation is not update application or service restart.
+The application settings screen edits only finite app-owned preferences, not raw
+environment variables, secrets or the actual host deployment.
+
 
 ### Optional services
 
