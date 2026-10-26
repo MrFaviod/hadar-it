@@ -583,3 +583,12 @@ ITSM_TEST_API_URL=http://127.0.0.1:18080 python3 tests/inventory.py
 Backend tests and integration evidence are documented in backend/README.md and `odd/tasks/phase-1.md`. Demo task submission is development-only, not a public unauthenticated task-execution service. Bind loopback and require a proper authorization boundary before exposing real business data/actions. No automatic schema migration on health checks and no sensitive URL/secret values in logs or errors.
 
 To stop only this stack, use its explicit Compose project and `down` **without `--volumes`**. Persistent-volume deletion, changing existing services and production deployment require separate authorization.
+
+## AI provider credential storage
+
+The unified conversation uses the existing agent-session API and per-person ownership. Global provider and engine administration remains restricted to the installation Superadmin. Adding a personal OpenAI-compatible provider requires an explicit `agents.providers.personal` grant; the default User does not receive it.
+
+Supply `ITSM_AI_CREDENTIAL_KEY` externally to the API process (and the same application containers through the existing Compose environment). It must be a valid Fernet key for encrypted provider credentials. The application does not generate or store the installation key. Keep it separate from SQL backups, retain it for recovery, and use the same key after a restart. Losing it makes previously encrypted credentials unreadable; changing it is not a credential-rotation procedure. Never place it in a committed file, browser storage, logs or a database row. Without the key, provider credential writes report unavailable rather than storing plaintext.
+
+Provider model lists are explicitly configured; they are not evidence of model availability or successful inference. An installed external engine remains unavailable for conversation until the selected active profile, restricted tools, ITSM MCP identity and skills pass verification. A configured endpoint, an executable on PATH or a synthetic test response alone is not that proof. OpenCode and Hermes remain external host services, not new Compose application services.
+

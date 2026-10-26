@@ -32,6 +32,8 @@ x-backend: &backend
     ITSM_AGENT_MAX_HISTORY_MESSAGES: ${ITSM_AGENT_MAX_HISTORY_MESSAGES:-20}
     ITSM_AGENT_MAX_OUTPUT_TOKENS: ${ITSM_AGENT_MAX_OUTPUT_TOKENS:-1024}
     ITSM_AGENT_OPENAI_BASE_URL: ${ITSM_AGENT_OPENAI_BASE_URL:-}
+    # Required only for encrypted provider credential administration; keep outside SQL backups.
+    ITSM_AI_CREDENTIAL_KEY: ${ITSM_AI_CREDENTIAL_KEY:-}
     # Optional fixed-action executor; credentials remain externally supplied.
     ITSM_SYSTEM_EXECUTOR_URL: ${ITSM_SYSTEM_EXECUTOR_URL:-}
     ITSM_SYSTEM_EXECUTOR_TOKEN: ${ITSM_SYSTEM_EXECUTOR_TOKEN:-}
