@@ -391,6 +391,40 @@ a model-supplied identity. Live third-party provider/Hermes behavior is separate
 from scripted-model and actual MCP protocol evidence; consult the phase record
 before claiming either verified.
 
+#### Bare-metal OpenCode and Hermes
+
+Run OpenCode and Hermes on the host, outside Compose. The shared backend service
+configuration maps `host.docker.internal` to Docker's `host-gateway`; register an
+engine URL such as `http://host.docker.internal:<engine-port>` in Configuración → IA.
+Use the engine's actual configured port, never a guessed default. The backend
+connects through official HTTP APIs and streaming (including SSE), not a newly
+introduced WebSocket transport. OpenCode uses its server Basic credentials;
+Hermes uses the authentication required by its HTTP API. Supply credentials through
+the existing external secret-reference mechanism, not through URLs or skill files.
+
+On Linux, a host process bound only to `127.0.0.1` is not reachable through the
+bridge gateway. Bind each engine to the host's Docker-facing address, or use an
+authenticated host-side proxy on that address. If the engine must bind all
+interfaces, restrict its port to the intended container network with the host
+firewall; do not expose it publicly. This repository does not change host listeners,
+firewall rules or Docker daemon configuration automatically. Remote bare-metal
+engines use their real routable DNS name instead of the local host alias.
+
+For the reverse MCP connection, the host engine must reach the backend's published
+MCP URL, not a Compose-only service name. The default host publication is
+`http://127.0.0.1:18000/api/v1/mcp`; account for any configured API port and use its
+separate least-privilege machine bearer. Engine API credentials and MCP credentials
+are not interchangeable. A remote host needs an explicitly secured routable MCP URL.
+
+Install skills and inspect profiles using the auxiliary installer on the selected
+bare-metal host. Do not mount host home directories, engine profiles or the Docker
+socket into the ITSM container. Network reachability does not establish trusted
+profile safety; the acceptance blockers in `backend/docs/agent-integrations.md`
+still apply. To undo the alias change, remove `extra_hosts` from `x-backend` and
+recreate only the affected services during an authorized maintenance window.
+
+Docker reference: [Compose networking and host gateway](https://docs.docker.com/compose/how-tos/networking/).
+
 ### Maintenance reminder preparation
 
 Phase 7 adds persisted preventive plans, interventions and technical incidents. Apply
