@@ -55,6 +55,16 @@ Phase 11 closure. Confirmed corrections stay localized:
 import transaction occupancy, directory states, warranty queries/refresh and shared
 Docker-volume SELinux labeling. This remains pre-alpha, not a production certification.
 
+## Daily AI quotas
+
+Company and personal daily policies, user exceptions and SQL-backed admission
+now feed the existing IA configuration and conversation balances. Usage reports
+preserve measured/estimated/unavailable evidence; unknown outcomes retain holds.
+Managed native runs use a scoped gateway and disposable profiles, but remain
+honestly admission-only without verified input bounds and network isolation.
+See [executed evidence, known failures and operating prerequisites](docs/ai-usage-quotas-validation.md)
+and the [approved feature record](odd/tasks/ai-usage-quotas.md).
+
 ## Components
 
 Three independent Git repositories live here; root Git ignores the two components. Clone/back up each independently. No submodules or release pipeline are implied.
