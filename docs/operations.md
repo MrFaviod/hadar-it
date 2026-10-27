@@ -441,11 +441,12 @@ before claiming either verified.
 Run OpenCode and Hermes on the host, outside Compose. The shared backend service
 configuration maps `host.docker.internal` to Docker's `host-gateway`; register an
 engine URL such as `http://host.docker.internal:<engine-port>` in Configuración → IA.
-Use the engine's actual configured port, never a guessed default. The backend
-connects through official HTTP APIs and streaming (including SSE), not a newly
-introduced WebSocket transport. OpenCode uses its server Basic credentials;
-Hermes uses the authentication required by its HTTP API. Supply credentials through
-the existing external secret-reference mechanism, not through URLs or skill files.
+Use the engine's actual configured port, never a guessed default. OpenCode uses its
+native HTTP/SSE API and server Basic credentials. Hermes 0.22.5 uses native
+JSON-RPC/WebSocket at `/api/ws`; its bundled password-login provider issues the
+dashboard session/ticket. It is not an OpenAI `/v1` server, and HTTP Basic headers
+are not its login protocol. Supply engine credentials through the existing
+external secret-reference mechanism, never URLs or skill files.
 
 On Linux, a host process bound only to `127.0.0.1` is not reachable through the
 bridge gateway. Bind each engine to the host's Docker-facing address, or use an
@@ -467,6 +468,55 @@ socket into the ITSM container. Network reachability does not establish trusted
 profile safety; the acceptance blockers in `backend/docs/agent-integrations.md`
 still apply. To undo the alias change, remove `extra_hosts` from `x-backend` and
 recreate only the affected services during an authorized maintenance window.
+
+For a dedicated local development Hermes profile, use the pinned workspace
+executable with the host-owned launcher:
+
+The verified Hermes version is 0.22.5 at upstream commit
+`bf0203a794a07aac3ff764972ab9087baa4e4f4e`. Its dedicated environment must include
+the lockfile's `mcp` extra: a bare installation can start `serve` yet expose no
+ITSM tools. The local verification used `uv sync --frozen --extra mcp
+--no-default-groups --inexact --no-install-project --no-config --no-cache
+--no-python-downloads --python .venv/bin/python` from the pinned source checkout,
+after inspecting the same command with `--dry-run`. Do not upgrade a global
+installation or replace an operator's profile implicitly.
+
+```bash
+# Supply ITSM_HERMES_MODEL, HERMES_DASHBOARD_BASIC_AUTH_PASSWORD and an independent
+# ITSM_HERMES_INSPECTOR_TOKEN (at least 32 characters) in the process environment.
+# Supply ITSM_HERMES_PROVIDER_URL/KEY and optional ITSM_HERMES_HEADERS_JSON, or
+# explicitly opt into --omp-config with the operator-authorized provider config.
+backend/.venv/bin/python scripts/itsm-ai-dev.py \
+  --binary /absolute/path/to/pinned/hermes \
+  --home /absolute/path/to/dedicated/profiles/itsm
+```
+
+The launcher binds loopback, defaults to `admin` but never supplies a password,
+preserves existing config, and writes provider/header environment references,
+not credential values. Its independently authenticated `/profile-proof` endpoint
+attests only its own live child, exact config digest, home and endpoint. Installation
+can restart only that child to load the new restricted configuration. Configure
+the API's `ITSM_HERMES_INSPECTOR_URL` and `ITSM_HERMES_INSPECTOR_TOKEN` together;
+the inspector token must be separate from dashboard, provider and MCP credentials.
+The development password must be changed before production, with a secured
+listener/authentication configuration. This script does not install Hermes or
+modify existing home profiles.
+
+For hot-swapping between Hermes profiles, register each dedicated home and
+distinct loopback port at launcher startup using repeatable
+`--additional-profile /absolute/path/to/profiles/itsm-review=19122`. Register each
+as a separate ITSM instance and verify both. Proof requests can select only an
+exact home/endpoint pair from that fixed startup allowlist; they cannot create
+profiles or choose a binary, port or command.
+
+Admin and Superadmin may select verified Hermes/OpenCode instances. Ordinary
+Users may select only Pydantic AI, executed in actual per-user labeled containers
+through the separately authenticated fixed host broker. There is no in-process
+fallback and no Docker socket in the API. See
+`backend/docs/ai-runtime-isolation.md` for broker deployment and sandbox settings.
+Changing a chat profile selects another authorized configured instance, resets
+its native session and preserves the ITSM transcript/draft; it never changes a
+shared engine's active profile in place.
 
 Docker reference: [Compose networking and host gateway](https://docs.docker.com/compose/how-tos/networking/).
 

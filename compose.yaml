@@ -34,6 +34,13 @@ x-backend: &backend
     ITSM_AGENT_OPENAI_BASE_URL: ${ITSM_AGENT_OPENAI_BASE_URL:-}
     # Required only for encrypted provider credential administration; keep outside SQL backups.
     ITSM_AI_CREDENTIAL_KEY: ${ITSM_AI_CREDENTIAL_KEY:-}
+    # Ordinary User inference fails closed without the separate host-side container broker.
+    # Do not mount the Docker socket or application SQL volumes into User runtimes.
+    ITSM_AI_BROKER_URL: ${ITSM_AI_BROKER_URL:-}
+    ITSM_AI_BROKER_TOKEN: ${ITSM_AI_BROKER_TOKEN:-}
+    # Optional independently authenticated host-owned Hermes launch inspector.
+    ITSM_HERMES_INSPECTOR_URL: ${ITSM_HERMES_INSPECTOR_URL:-}
+    ITSM_HERMES_INSPECTOR_TOKEN: ${ITSM_HERMES_INSPECTOR_TOKEN:-}
     # Optional fixed-action executor; credentials remain externally supplied.
     ITSM_SYSTEM_EXECUTOR_URL: ${ITSM_SYSTEM_EXECUTOR_URL:-}
     ITSM_SYSTEM_EXECUTOR_TOKEN: ${ITSM_SYSTEM_EXECUTOR_TOKEN:-}
