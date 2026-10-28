@@ -65,6 +65,22 @@ honestly admission-only without verified input bounds and network isolation.
 See [executed evidence, known failures and operating prerequisites](docs/ai-usage-quotas-validation.md)
 and the [approved feature record](odd/tasks/ai-usage-quotas.md).
 
+## Native application extensions
+
+The versioned SDK supports independent backend operations and durable collections,
+explicit migrations, native Vue pages and asset panels, namespaced permissions,
+scheduled inbox notices and shared chat/MCP tools. Start with the
+[human and agent SDK guide](backend/docs/extensions-sdk.md), the
+[native frontend contract](frontend/docs/extensions-sdk.md) and the
+[host lifecycle and trust boundary](backend/docs/extensions-host.md).
+
+Packages are validated offline before a persisted human Superadmin reviews the
+exact digest and approves installation. Installed Python and same-origin Vue are
+trusted native code, **not a hostile-code sandbox**. The
+[executed evidence and remaining proof](docs/native-extension-sdk-validation.md)
+distinguish SDK implementation from the still-pending full
+[software-license experiment](docs/software-license-extension-experiment.md).
+
 ## Components
 
 Three independent Git repositories live here; root Git ignores the two components. Clone/back up each independently. No submodules or release pipeline are implied.

@@ -642,3 +642,56 @@ Supply `ITSM_AI_CREDENTIAL_KEY` externally to the API process (and the same appl
 
 Provider model lists are explicitly configured; they are not evidence of model availability or successful inference. An installed external engine remains unavailable for conversation until the selected active profile, restricted tools, ITSM MCP identity and skills pass verification. A configured endpoint, an executable on PATH or a synthetic test response alone is not that proof. OpenCode and Hermes remain external host services, not new Compose application services.
 
+## Native extension SDK
+
+The application supports versioned **trusted native** extension packages. Python
+handlers execute inside the host process and Vue components execute in the
+same-origin application. Isolated development validation is not installed-code
+sandboxing. A persisted human Superadmin must review the exact package digest,
+requested permissions, migration plan and validation result before installation.
+Agents can prepare and submit candidates, but cannot approve them.
+
+Developer entry points are `backend/docs/extensions-sdk.md` (human quickstart,
+offline generator and validator), `backend/docs/extensions-host.md` (host and
+lifecycle contract) and `frontend/docs/extensions-sdk.md` (native Vue slots and
+components). Chat and MCP expose `extension_sdk_index` and bounded
+`extension_sdk_reference` references; arbitrary shell, filesystem and SQL access
+are not part of these tools.
+
+### Fixed validation broker
+
+Application containers deliberately have no Docker socket or Docker CLI. Run the
+fixed validator broker outside them under an operator-selected account that can
+start the dedicated validator image. Supply a separate random token of at least
+32 printable ASCII characters through `ITSM_EXTENSION_VALIDATOR_BROKER_TOKEN`;
+never pass it as a CLI argument or include it in an extension package. Run from `backend/`:
+
+```bash
+.venv/bin/python -m itsm.extensions serve-validator \
+  --listen 127.0.0.1 --port 8766 --image itsm-extension-validator:1
+```
+
+The image must already be built; see the backend SDK guide for its pinned offline
+build prerequisites.
+This service accepts only authenticated bounded packages at one fixed endpoint.
+It owns the image, command and resource restrictions; neither candidate code nor
+chat chooses them. Only package bytes and the SDK runtime enter the networkless
+validator container, without application mounts or credentials.
+
+Configure the application with the paired values `ITSM_EXTENSION_VALIDATOR_URL`
+(server base URL only) and `ITSM_EXTENSION_VALIDATOR_TOKEN` (the same dedicated
+broker secret). `ITSM_EXTENSION_VALIDATION_TIMEOUT_SECONDS` defaults to 60.
+For a host broker reached from Compose, the existing `host.docker.internal`
+gateway needs a restricted Docker-facing listener or authenticated TLS proxy;
+host loopback alone is not reachable from the application container. Use TLS
+outside loopback and restrict network access. No automatic broker deployment or
+network exposure is performed by Compose. Missing or unreachable validation is
+reported as unavailable, never passed.
+
+Workspace storage defaults in Compose to `/data/app/extension-workspaces` on the
+existing application volume. Installed versions, extension records, schema
+revisions and schedule state live in the canonical SQL database. Run the explicit
+migration command before readiness. Disabling an extension blocks its operations,
+removes native contributions and stops scheduled dispatch without deleting data.
+Upgrade migrations and compatibility-gated rollback are explicit human lifecycle
+actions; neither API nor worker startup migrates extension data.
