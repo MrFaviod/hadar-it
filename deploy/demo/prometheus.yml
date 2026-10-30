@@ -1,0 +1,35 @@
+# Reference scrape configuration for the ISOLATED demo Prometheus container.
+#
+# This checked-in file is a shape sample, not a usable target list: the uuid below
+# is deliberately not a real asset, so the exporter answers 404 for it. Generate
+# the installation-specific file instead (it has one job per monitored asset):
+#
+#   cd backend && .venv/bin/python -m itsm.demo setup \
+#     --directory /path/to/new-demo --username demo.owner --output ./prometheus-demo.yml
+#
+# Scrape targets are host-loopback addresses, so the container must share the host
+# network namespace (--network host) with --web.listen-address=127.0.0.1:<port>.
+# A bridge network with -p cannot reach the host exporter. Recipe:
+# backend/docs/demo.md.
+global:
+  scrape_interval: 15s
+  scrape_timeout: 10s
+  evaluation_interval: 60s
+
+# Demo Prometheus never talks to Alertmanager and never evaluates alerting rules:
+# the demonstration installation must not produce external notifications.
+# alerting: omitted on purpose
+# rule_files: omitted on purpose
+
+scrape_configs:
+  - job_name: demo-node-00000000
+    metrics_path: /metrics/00000000-0000-4000-8000-000000000000
+    scheme: http
+    static_configs:
+      - targets:
+          - 127.0.0.1:19101
+        labels:
+          asset_id: 00000000-0000-4000-8000-000000000000
+          check_type: node
+          module: node
+          dataset: fictional-infrastructure-v1
