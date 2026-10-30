@@ -1,0 +1,83 @@
+# Production installation overlay.
+#
+#   RELEASE_MODE=prod ITSM_DATABASE_URL=... ITSM_AUTH_ORIGIN=https://... \
+#     docker compose --env-file /dev/null -f compose.yaml -f deploy/compose.prod.yaml up -d
+#
+# The mode belongs to the Compose project name (itsm-prod). The database URL and
+# browser origin are required here on purpose: production must never inherit a
+# development default or guess the origin that cookie-authenticated mutations
+# are validated against. `initialize` runs the guarded upgrade: preflight,
+# verified backup, alembic, post-upgrade checks; a failure stops the project and
+# leaves the data in place (backend/docs/ops-backup-restore.md).
+#
+# Scheduled backups are a separate image, not the API image: the ops image has
+# the engine client tools and the backend gains no tools or sockets.
+#   RELEASE_MODE=prod ... docker compose ... --profile backup up -d
+
+x-prod-environment: &prod-environment
+  ITSM_DATABASE_URL: ${ITSM_DATABASE_URL:?Set ITSM_DATABASE_URL to the production database}
+  # Exact browser origin of the production installation, https included.
+  ITSM_AUTH_ORIGIN: ${ITSM_AUTH_ORIGIN:?Set ITSM_AUTH_ORIGIN to the exact production browser origin}
+  ITSM_AUTH_COOKIE_SECURE: "true"
+  # Automatic demo resets stay disabled outside demo.
+  ITSM_DEMO_PERIODIC_MINUTES: "0"
+
+x-backup-selinux: &backup-selinux
+  - no-new-privileges:true
+  # Same installation level as every consumer of this project's volumes.
+  - label=level:${ITSM_SELINUX_LEVEL:?Reserve an installation-specific SELinux MCS level before running Compose}
+
+services:
+  initialize:
+    image: itsm-ops:0.1.0
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.ops
+    environment:
+      <<: *prod-environment
+      ITSM_OPS_BACKUP_ROOT: /data/backups
+    volumes:
+      - backup-data:/data/backups
+
+  backend:
+    environment: *prod-environment
+
+  worker:
+    environment: *prod-environment
+
+  # `python -m itsm.deployment backup-loop`: backup, verify, then retention.
+  # RELEASE_MODE=prod is enforced by the command itself, so starting this
+  # service in another mode fails instead of writing an artifact elsewhere.
+  backup:
+    image: itsm-ops:0.1.0
+    build:
+      context: ./backend
+      # FROM itsm-backend:0.1.0. Build the application image first:
+      #   docker compose ... build backend
+      # The generic image ships Debian postgresql-client, mariadb-client and
+      # unixodbc. It carries no sqlcmd, and its PostgreSQL client major must
+      # match the server; see docs/release-modes-deployment.md.
+      dockerfile: Dockerfile.ops
+    profiles: [backup]
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 30s
+    command: [python, -m, itsm.deployment, backup-loop]
+    environment:
+      RELEASE_MODE: ${RELEASE_MODE:?Set RELEASE_MODE to dev, prod or demo}
+      ITSM_DATABASE_URL: ${ITSM_DATABASE_URL:?Set ITSM_DATABASE_URL to the production database}
+      ITSM_OPS_BACKUP_ROOT: /data/backups
+      ITSM_OPS_RETENTION_KEEP: ${ITSM_OPS_RETENTION_KEEP:-7}
+      ITSM_OPS_BACKUP_INTERVAL_SECONDS: ${ITSM_OPS_BACKUP_INTERVAL_SECONDS:-86400}
+      ITSM_LOG_LEVEL: ${ITSM_LOG_LEVEL:-INFO}
+    volumes:
+      - backup-data:/data/backups
+      - app-data:/data/app:ro
+    depends_on:
+      initialize:
+        condition: service_completed_successfully
+    security_opt: *backup-selinux
+    cap_drop: [ALL]
+
+volumes:
+  backup-data:

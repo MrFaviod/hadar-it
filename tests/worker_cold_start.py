@@ -25,6 +25,7 @@ def exercise(order, port):
     origin = f"http://127.0.0.1:{port}"
     password = uuid.uuid4().hex + "Aa1!"
     env = os.environ | {
+        "RELEASE_MODE": "prod",
         "ITSM_POSTGRES_PASSWORD": "cold-start-disposable-test-only",
         "ITSM_API_PORT": str(port),
         "ITSM_AUTH_ORIGIN": origin,
@@ -39,6 +40,9 @@ def exercise(order, port):
                           if name in ("postgres", "backend", "worker", "migrate")}
     for service in config["services"].values():
         service["restart"] = "no"
+        # This fixture intentionally exercises manual migration/bootstrap order,
+        # not the deployment initialize gate (covered by release-mode tests).
+        service.pop("depends_on", None)
     config["services"]["backend"]["environment"]["ITSM_BOOTSTRAP_PASSWORD"] = password
     compose = ["docker", "compose", "--env-file", "/dev/null", "--project-directory",
                str(ROOT), "-p", project, "-f", "-"]

@@ -1,0 +1,237 @@
+# Release-mode deployment: `dev`, `prod` and `demo`
+
+Compose wiring for the three release modes of one codebase. It implements the
+deployment part of the release-mode task (T6): per-mode Compose projects and
+volumes, a mandatory preparation gate, the production upgrade/backup services,
+a TLS entrypoint, and synthetic demo telemetry.
+
+This document describes configuration, not a deployment: no image was built, no
+service was started, and nothing here certifies that a mode runs end to end.
+What was actually checked, and what remains unproven, is listed at the end.
+
+Service commands (`prepare`, `backup-loop`, reset, seed, upgrade) belong to the
+backend; their contracts live in `backend/docs/deployment-preparation.md`,
+`release-modes.md`, `dev-mode.md`, `demo-reset.md`, `demo-public.md` and
+`ops-backup-restore.md`.
+
+## 1. `RELEASE_MODE` is required
+
+`RELEASE_MODE` is an unprefixed process variable (deployment identity, not
+`ITSM_` configuration). It is required in three places, so no path starts a
+process that has not decided which mode it is:
+
+| Where | Enforced how | Failure |
+|---|---|---|
+| Compose project name | `name: itsm-${RELEASE_MODE:?…}` | any `docker compose` command fails |
+| Every application container | `RELEASE_MODE: ${RELEASE_MODE:?…}` in the shared environment | missing value fails at interpolation |
+| `prepare`, API and worker | `itsm.release_mode` / `itsm.release_identity` | exit non-zero before serving |
+
+Compose can only reject an **absent** value; it cannot judge `production` or
+`Demo`. Validation of the value itself is the backend contract: `prepare`
+refuses an absent or invalid mode with exit `1` before it touches a database,
+and the API and worker do the same at startup.
+
+There is no default and no `.env` file in this repository. Pass variables
+explicitly and keep Compose away from any local `.env`:
+
+```bash
+docker compose --env-file /dev/null ...
+```
+
+## 2. One project and one volume set per mode
+
+The project name carries the mode, so containers, the default network and every
+named volume are mode-prefixed. A `dev` installation cannot reach a `prod`
+volume by name, and two modes never share a database file, an attachment
+directory or a task queue:
+
+| Mode | Compose project | Database | Mode-owned volume |
+|---|---|---|---|
+| `dev` | `itsm-dev` | SQLite `/data/dev/dev.db` | `itsm-dev_dev-data` → `/data/dev` |
+| `prod` | `itsm-prod` | external `ITSM_DATABASE_URL` (or the `local-postgres` profile) | `itsm-prod_app-data`, `…_task-data`, `…_attachment-data`, `…_backup-data` |
+| `demo` | `itsm-demo` | SQLite `/data/demo/demo.db` | `itsm-demo_demo-data` → `/data/demo` |
+
+`dev` and `demo` deliberately replace the inherited `app-data` / `task-data` /
+`attachment-data` mounts with one owned directory each (`!override` in the
+overlay), because their reset/preparation code requires storage under a single
+validated root. The existing `migrate` service stays a manual `tools`-profile
+command and is not part of any mode flow.
+
+## 3. Starting a mode
+
+```bash
+# dev: local SQLite, seeded fictional data, loopback HTTP
+RELEASE_MODE=dev \
+ITSM_DEV_ADMIN_PASSWORD=<local dev password> \
+ITSM_SELINUX_LEVEL=<reserved MCS level> \
+docker compose --env-file /dev/null -f compose.yaml -f deploy/compose.dev.yaml up -d
+
+# prod: external database, guarded upgrade, cookies over TLS
+RELEASE_MODE=prod \
+ITSM_DATABASE_URL='postgresql+psycopg://itsm:<password>@<host>:5432/itsm' \
+ITSM_AUTH_ORIGIN=https://itsm.example.com \
+ITSM_SELINUX_LEVEL=<reserved MCS level> \
+docker compose --env-file /dev/null -f compose.yaml -f deploy/compose.prod.yaml up -d
+
+# demo: one shared fictional installation, in-process 60-minute reset
+RELEASE_MODE=demo \
+ITSM_AUTH_ORIGIN=https://demo.example.com \
+ITSM_SELINUX_LEVEL=<reserved MCS level> \
+docker compose --env-file /dev/null -f compose.yaml -f deploy/compose.demo.yaml up -d
+```
+
+Optional profiles: `tls` (HTTPS entrypoint), `backup` (prod backups),
+`monitoring-demo` (synthetic telemetry), plus the existing `local-postgres`,
+`redis`, `search`, `monitoring*` and `tools` profiles.
+
+## 4. Variables per mode
+
+Documented, not shipped: this repository contains no `.env` file and no
+substitute for one (see root `AGENTS.md`). Use the process environment.
+
+| Variable | `dev` | `prod` | `demo` |
+|---|---|---|---|
+| `RELEASE_MODE` | required `dev` | required `prod` | required `demo` |
+| `ITSM_SELINUX_LEVEL` | required | required | required |
+| `ITSM_DATABASE_URL` | overlay default `sqlite:////data/dev/dev.db` | **required** | overlay default `sqlite:////data/demo/demo.db` |
+| `ITSM_AUTH_ORIGIN` | default `http://localhost:18080` | **required**, https | **required**, exact public origin |
+| `ITSM_AUTH_COOKIE_SECURE` | `false` (loopback HTTP only) | `true` | base default `true` |
+| `ITSM_DEV_ADMIN_PASSWORD` | **required** by overlay and `prepare` | – | – |
+| `ITSM_DEMO_DATA_DIRECTORY` | – | – | `/data/demo` |
+| `ITSM_OPS_BACKUP_ROOT` | – | `/data/backups` (backup service) | – |
+| `ITSM_OPS_RETENTION_KEEP` | – | default `7` | – |
+| `ITSM_OPS_BACKUP_INTERVAL_SECONDS` | – | default `86400`, minimum `60` | – |
+| `ITSM_TLS_CERTIFICATE` | profile `tls` | profile `tls` | profile `tls` |
+| `ITSM_TLS_CERTIFICATE_KEY` | profile `tls` | profile `tls` | profile `tls` |
+| `ITSM_TLS_BIND` / `ITSM_TLS_PORT` | `127.0.0.1` / `18443` | same | same |
+| `ITSM_PROMETHEUS_URL` | unchanged | unchanged | `http://host.docker.internal:19190` |
+| `ITSM_DEMO_PROMETHEUS_PORT` | – | – | `19190` |
+| `ITSM_API_PORT` / `ITSM_FRONTEND_PORT` | `18000` / `18080`, loopback | same | same |
+
+Demo also blanks every real integration channel it inherits
+(`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `ITSM_AI_CREDENTIAL_KEY`,
+`ITSM_AI_BROKER_*`, `ITSM_SYSTEM_EXECUTOR_*`, `ITSM_HERMES_INSPECTOR_*`,
+`ITSM_EXTENSION_VALIDATOR_*`, `ITSM_ALERTMANAGER_*`, `ITSM_MONITORING_SECRETS`,
+`ITSM_MONITORING_INGEST_TOKEN`, `ITSM_MEILISEARCH_*`). An exported secret in the
+operator's shell therefore cannot reach the public demonstration.
+
+## 5. The preparation gate
+
+`initialize` runs `python -m itsm.deployment prepare` once per deployment, and
+both `backend` and `worker` depend on it with
+`condition: service_completed_successfully`. A failed preparation stops the
+project; the API never starts against unprepared data.
+
+| Mode | What `prepare` does |
+|---|---|
+| `dev` | migrations, claim the database for `dev`, create the explicit dev administrator, seed the fictional dataset (idempotent) |
+| `prod` | empty database: migrate to head; existing database: guarded upgrade (preflight, verified backup, Alembic, post-upgrade verification) |
+| `demo` | migrate, claim the database for demo, validate the owned data directory, seed the fictional dataset and the `admin`/`admin` visitor (idempotent) |
+
+A failure in any of these is a stopped deployment, not a partially prepared one:
+production keeps its data and reports the backup and restore command.
+
+## 6. Production upgrade and backups
+
+**Upgrade** is the `prepare` step of the one-shot `initialize` service in
+`prod`, using the maintenance image and persistent backup volume (not the API
+image). It refuses a database newer than the code, takes and verifies a
+backup before migrating, and stops on failure with the exact restore command.
+
+**Backups** run in a separate service (`--profile backup`) using its own image:
+
+- image `itsm-ops:0.1.0`, `backend/Dockerfile.ops`, which is
+  `FROM itsm-backend:0.1.0`. Build the application image first:
+  `docker compose … build backend`, then `docker compose … build initialize`
+  and `docker compose … --profile backup build backup`.
+- artifact root `/data/backups` on the mode-owned `backup-data` volume;
+  retention default `7` (+ the always-protected newest artifact), daily by
+  default, minimum interval 60 s.
+- `RELEASE_MODE=prod` is enforced by the command itself, so the service fails
+  instead of writing artifacts when started in another mode.
+- the generic ops image ships Debian `postgresql-client`, `mariadb-client` and
+  `unixodbc`, and **no `sqlcmd`**: SQL Server backups are not runnable from it.
+  Its PostgreSQL client major must match the server major (PG 16 servers need a
+  PG 16 tool image, which this generic image does not guarantee).
+- **Gap:** the backend exposes no backup-status endpoint yet, so the read-only
+  status channel into the API is not wired. `python -m itsm.ops status` in the
+  ops image is the only consumer of `status.json` today.
+
+## 7. TLS entrypoint
+
+`deploy/nginx-tls.conf` is mounted by the optional `proxy` service
+(`--profile tls`). It terminates TLS for one origin and forwards `/api/` to the
+backend and everything else to the frontend.
+
+- certificates are supplied externally as PEM **content** through
+  `ITSM_TLS_CERTIFICATE` and `ITSM_TLS_CERTIFICATE_KEY`; Compose materialises
+  them as files at `/run/secrets/tls_certificate{,_key}`. Nothing is generated,
+  no host certificate path is assumed, and an unset value is reported by Compose
+  when the profile is used.
+- `ITSM_AUTH_ORIGIN` must be the exact public origin served here, otherwise the
+  backend's Origin/CSRF guard refuses cookie-authenticated mutations.
+- the listener is `8080` inside the container and runs as the unprivileged
+  nginx user (`101:101`, `cap_drop: ALL`, read-only root filesystem, tmpfs).
+  It is published on `127.0.0.1:18443` unless `ITSM_TLS_BIND` is widened on
+  purpose; for a public installation set `ITSM_TLS_BIND=0.0.0.0` deliberately
+  and firewall host ports 18000/18080.
+- response headers: HSTS, `X-Content-Type-Options`, `Referrer-Policy`,
+  `X-Frame-Options`, TLS 1.2+ with session tickets off. The transport limits
+  (`3 r/s`, burst 60) only absorb anonymous floods; the backend's own request,
+  body and session limits remain the authority. `client_max_body_size 12m`
+  leaves headroom over the 10 MiB attachment limit, and the 130 s proxy
+  timeouts leave headroom over the 120 s report rendering limit.
+- there is no plain-HTTP redirect listener: the TLS port is the only published
+  entrypoint for an exposed installation.
+
+## 8. Synthetic demo telemetry
+
+`deploy/demo-prometheus.yml` is the scrape configuration of the optional
+`demo-prometheus` service (`--profile monitoring-demo`). It reuses the existing
+exporter → Prometheus chain: no new platform, no `remote_write`, no alerting and
+no rule files, so the demonstration can never notify anyone or reach a real
+target.
+
+- the demo exporter binds `127.0.0.1` only, so Prometheus has to share the host
+  network namespace, exactly as documented in `backend/docs/demo.md`; that is
+  why the service uses `network_mode: host` and no port mapping.
+- it listens only on `127.0.0.1:19190`; the storage path is a tmpfs (synthetic
+  and disposable). This sample is deliberately not exposed to the LAN. The
+  backend container cannot reach that host-loopback listener; an isolated
+  exporter/scraper network and regenerated targets remain required integration
+  work. The configured host-gateway URL is not evidence of a working dashboard.
+- the checked-in file is a **shape sample**: its asset UUID is not a real demo
+  asset, so the target stays down instead of inventing data. Replace it, at the
+  same path, with the output of
+  `python -m itsm.demo setup --directory <demo data dir> --username demo.owner
+  --exporter-port 19101 --output deploy/demo-prometheus.yml`, and regenerate it
+  after a demo reseed because asset identifiers change with the dataset.
+- the exporter itself runs on the host as documented
+  (`python -m itsm.demo exporter --directory <demo data dir> --port 19101`), not
+  as a Compose service.
+
+**Gap:** the exporter needs a host path to the demo data directory, which lives
+in the `itsm-demo_demo-data` volume. The complete dashboard → Prometheus →
+exporter path is therefore not proven end to end; see the limits below.
+
+## 9. What differs between the modes
+
+| Aspect | `dev` | `prod` | `demo` |
+|---|---|---|---|
+| Database | owned SQLite under `/data/dev` | external, required URL | owned SQLite under `/data/demo` |
+| Initial data | seeded fictional dataset + dev admin | empty, real data only | seeded fictional dataset + `admin`/`admin` |
+| Sessions | loopback HTTP, cookies not Secure | Secure cookies, exact https origin | Secure cookies, exact public origin |
+| Destructive reset | manual `itsm.devtools reset`, guarded | not allowed | automatic every 60 minutes, in-process |
+| Task consumer | worker | worker | none by default (worker behind `demo-external-consumer`) |
+| Providers, executors, installs | allowed by capability, unused unless configured | allowed | refused and blanked in the environment |
+| Upgrades | `prepare` migrates | `prepare` runs the guarded upgrade | `prepare` migrates |
+| Backups | – | `backup` service + `itsm.ops` | – |
+| TLS | – | profile `tls` | profile `tls` (required for public exposure) |
+| Telemetry | existing `monitoring*` profiles | existing `monitoring*` profiles | synthetic `monitoring-demo` |
+
+## 11. Operational limits
+
+- Alpha software is not a production-readiness guarantee. Rehearse TLS, upgrades and restore on a separate installation.
+- The ops recipe does not back up SQL Server.
+- Build the backend image before the ops image, which derives from it.
+- Give each installation separate projects, storage, ports and SELinux labels.

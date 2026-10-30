@@ -1,0 +1,52 @@
+# Synthetic telemetry scrape configuration for the public demonstration.
+#
+# Mounted by the optional `demo-prometheus` service (deploy/compose.demo.yaml,
+# profile `monitoring-demo`). It is deliberately small: no alerting, no rule
+# files, no remote_write and no target outside the loopback demo exporter, so
+# the demonstration cannot produce external notifications or reach real
+# infrastructure.
+#
+# The demo exporter binds 127.0.0.1 only, so Prometheus has to share the host
+# network namespace (that is why the service sets network_mode: host). Exporter
+# and Prometheus both run outside the Compose bridge network:
+#
+#   cd backend && .venv/bin/python -m itsm.demo exporter \
+#     --directory <demo data directory> --port 19101
+#
+# The document below is a shape sample: the asset UUID is not a real demo asset,
+# so the exporter answers 404 and the target stays down instead of inventing
+# data. Replace this file with an installation-specific one, without changing
+# its path, using the documented generator:
+#
+#   cd backend && .venv/bin/python -m itsm.demo setup \
+#     --directory <demo data directory> --username demo.owner \
+#     --exporter-port 19101 --output <this file>
+#
+# The generated file has one job per monitored asset. `setup` refuses to
+# overwrite an existing file, so move this sample aside deliberately first.
+# Regenerate it after a demo reseed, because asset identifiers change with the
+# dataset. Recipe: backend/docs/demo.md.
+global:
+  scrape_interval: 15s
+  scrape_timeout: 10s
+  evaluation_interval: 60s
+
+# alerting: omitted on purpose - the demonstration never notifies anyone.
+# rule_files: omitted on purpose - no alert state is derived from fiction.
+# remote_write: omitted on purpose - no metrics leave the host.
+
+scrape_configs:
+  - job_name: demo-prometheus
+    static_configs:
+      - targets: [127.0.0.1:19190]
+
+  - job_name: demo-node-00000000
+    metrics_path: /metrics/00000000-0000-4000-8000-000000000000
+    scheme: http
+    static_configs:
+      - targets: [127.0.0.1:19101]
+        labels:
+          asset_id: 00000000-0000-4000-8000-000000000000
+          check_type: node
+          module: node
+          dataset: fictional-infrastructure-v1

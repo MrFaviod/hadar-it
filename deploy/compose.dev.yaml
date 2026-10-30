@@ -1,0 +1,55 @@
+# Development installation overlay.
+#
+#   RELEASE_MODE=dev ITSM_DEV_ADMIN_PASSWORD=... docker compose \
+#     --env-file /dev/null -f compose.yaml -f deploy/compose.dev.yaml up -d
+#
+# The mode belongs to the Compose project name (itsm-dev), so the volumes below
+# never overlap a prod or demo installation. `dev` is bound to a local SQLite
+# database by the backend guard; a remote database is refused before any
+# connection is opened (backend/docs/release-modes.md, backend/docs/dev-mode.md).
+#
+# `initialize` runs `python -m itsm.deployment prepare`, which in dev applies the
+# migrations, claims the database for `dev`, creates the explicit dev
+# administrator and seeds the fictional dataset. It is idempotent.
+#
+# Every service that shares the data volume repeats the same settings: the base
+# environment map is merged by key, so the inherited defaults for the other
+# modes stay untouched and only these paths are replaced.
+
+x-dev-environment: &dev-environment
+  # One local SQLite file inside the project's own volume.
+  ITSM_DATABASE_URL: sqlite:////data/dev/dev.db
+  ITSM_TASK_STORAGE: sqlite
+  ITSM_TASK_SQLITE_PATH: /data/dev/tasks/huey.db
+  ITSM_ATTACHMENT_STORAGE_PATH: /data/dev/attachments
+  # Local safety input for `python -m itsm.devtools status|reset`; a reset
+  # refuses any path outside a development directory or this one.
+  ITSM_DEV_DATA_DIR: /data/dev
+  # Loopback HTTP only. An exposed installation must not reuse this value.
+  ITSM_AUTH_ORIGIN: ${ITSM_AUTH_ORIGIN:-http://localhost:18080}
+  ITSM_AUTH_COOKIE_SECURE: "false"
+  # Password for the explicit dev administrator created by `prepare`.
+  # Supplied externally; never commit it and never reuse it outside dev.
+  ITSM_DEV_ADMIN_PASSWORD: ${ITSM_DEV_ADMIN_PASSWORD:?Set ITSM_DEV_ADMIN_PASSWORD for the dev administrator}
+
+x-dev-volumes: &dev-volumes
+  # The inherited app/tasks/attachments volumes are replaced on purpose: dev
+  # keeps database, attachments and queued work together under /data/dev so a
+  # single reset covers them.
+  volumes: !override [dev-data:/data/dev]
+
+services:
+  initialize:
+    environment: *dev-environment
+    <<: *dev-volumes
+
+  backend:
+    environment: *dev-environment
+    <<: *dev-volumes
+
+  worker:
+    environment: *dev-environment
+    <<: *dev-volumes
+
+volumes:
+  dev-data:

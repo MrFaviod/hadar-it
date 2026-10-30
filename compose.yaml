@@ -1,4 +1,9 @@
-name: itsm
+# One codebase, one release mode per project. The project name carries the mode
+# so dev, prod and demo never share containers, networks or named volumes: the
+# volumes below become itsm-dev_app-data, itsm-prod_app-data, ...
+# RELEASE_MODE is required here, so a Compose command without it fails instead
+# of starting a process that cannot decide which mode it is.
+name: itsm-${RELEASE_MODE:?Set RELEASE_MODE to dev, prod or demo}
 
 x-backend: &backend
   image: itsm-backend:0.1.0
@@ -8,6 +13,10 @@ x-backend: &backend
   extra_hosts:
     - "host.docker.internal:host-gateway"
   environment: &backend-env
+    # Deployment identity. Unprefixed on purpose: it is not application
+    # configuration. Every process validates it; absent or invalid refuses to
+    # start (backend/docs/release-modes.md).
+    RELEASE_MODE: ${RELEASE_MODE:?Set RELEASE_MODE to dev, prod or demo}
     ITSM_DATABASE_URL: ${ITSM_DATABASE_URL:-postgresql+psycopg://itsm:${ITSM_POSTGRES_PASSWORD:-}@postgres:5432/itsm}
     ITSM_TASK_STORAGE: ${ITSM_TASK_STORAGE:-sqlite}
     ITSM_TASK_SQLITE_PATH: /data/tasks/huey.db
@@ -88,9 +97,21 @@ x-backend: &backend
   restart: unless-stopped
 
 services:
+  # Explicit gate before any process serves traffic or consumes a task. The
+  # command is the same in every mode; `prepare` decides what that mode needs
+  # (dev seed, demo migration/claim/seed, prod guarded upgrade) and fails the
+  # project instead of letting API/worker start on unprepared or foreign data.
+  initialize:
+    <<: *backend
+    restart: "no"
+    command: [python, -m, itsm.deployment, prepare]
+
   backend:
     <<: *backend
     ports: ["127.0.0.1:${ITSM_API_PORT:-18000}:8000"]
+    depends_on:
+      initialize:
+        condition: service_completed_successfully
     healthcheck:
       test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health/ready', timeout=3)"]
       interval: 10s
@@ -102,6 +123,9 @@ services:
     <<: *backend
     command: [python, -m, huey.bin.huey_consumer, itsm.tasks.runtime.huey, -w, "1", "-k", thread]
     stop_grace_period: 30s
+    depends_on:
+      initialize:
+        condition: service_completed_successfully
 
   migrate:
     <<: *backend
@@ -127,6 +151,34 @@ services:
       interval: 15s
       timeout: 5s
       retries: 3
+
+  # Optional TLS entrypoint for an exposed installation. Certificates are
+  # supplied externally as PEM content through ITSM_TLS_CERTIFICATE and
+  # ITSM_TLS_CERTIFICATE_KEY; Compose materialises them as files inside the
+  # container, where deploy/nginx-tls.conf reads them. Nothing is generated and
+  # no host certificate path is assumed. The listener stays on loopback unless
+  # ITSM_TLS_BIND is widened deliberately.
+  proxy:
+    image: nginx:1.29-alpine
+    profiles: [tls]
+    entrypoint: [nginx, -g, daemon off;]
+    ports: ["${ITSM_TLS_BIND:-127.0.0.1}:${ITSM_TLS_PORT:-18443}:8080"]
+    volumes:
+      - ./deploy/nginx-tls.conf:/etc/nginx/nginx.conf:ro,Z
+    secrets: [tls_certificate, tls_certificate_key]
+    depends_on:
+      backend:
+        condition: service_started
+      frontend:
+        condition: service_started
+    # Unprivileged nginx: the listener is 8080 inside the container and the
+    # process never needs a privileged port or a user switch.
+    user: "101:101"
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    restart: unless-stopped
 
   postgres:
     image: postgres:16.13-bookworm@sha256:472efd9a66f2b2f1a5aeb18b28de74332e6ef88c2b93a1a5d812fb6db67a5f60
@@ -284,3 +336,10 @@ secrets:
     environment: ITSM_MONITORING_INGEST_TOKEN
   snmp_auths:
     environment: ITSM_SNMP_AUTHS
+  # Only the optional `tls` profile consumes these; an unset variable is
+  # reported by Compose when that profile is actually used, so every other mode
+  # validates without any certificate input.
+  tls_certificate:
+    environment: ITSM_TLS_CERTIFICATE
+  tls_certificate_key:
+    environment: ITSM_TLS_CERTIFICATE_KEY
