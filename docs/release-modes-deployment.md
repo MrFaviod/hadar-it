@@ -104,8 +104,8 @@ substitute for one (see root `AGENTS.md`). Use the process environment.
 | `ITSM_TLS_CERTIFICATE` | profile `tls` | profile `tls` | profile `tls` |
 | `ITSM_TLS_CERTIFICATE_KEY` | profile `tls` | profile `tls` | profile `tls` |
 | `ITSM_TLS_BIND` / `ITSM_TLS_PORT` | `127.0.0.1` / `18443` | same | same |
-| `ITSM_PROMETHEUS_URL` | unchanged | unchanged | `http://host.docker.internal:19190` |
-| `ITSM_DEMO_PROMETHEUS_PORT` | – | – | `19190` |
+| `ITSM_PROMETHEUS_URL` | unchanged | unchanged | `http://demo-prometheus:9090` |
+| Prometheus published port | – | – | none (private network only) |
 | `ITSM_API_PORT` / `ITSM_FRONTEND_PORT` | `18000` / `18080`, loopback | same | same |
 
 Demo also blanks every real integration channel it inherits
@@ -153,9 +153,10 @@ backup before migrating, and stops on failure with the exact restore command.
   `unixodbc`, and **no `sqlcmd`**: SQL Server backups are not runnable from it.
   Its PostgreSQL client major must match the server major (PG 16 servers need a
   PG 16 tool image, which this generic image does not guarantee).
-- **Gap:** the backend exposes no backup-status endpoint yet, so the read-only
-  status channel into the API is not wired. `python -m itsm.ops status` in the
-  ops image is the only consumer of `status.json` today.
+- `GET /api/v1/system/backups/status` requires reserved `system.view` authority.
+  Ops publishes a sanitized atomic summary to `ITSM_OPS_STATUS_PATH`; the API
+  reads `ITSM_BACKUP_STATUS_PATH` from a separate read-only status volume.
+  Backup artifacts, engine tools and hashing remain exclusively in maintenance.
 
 ## 7. TLS entrypoint
 
@@ -186,33 +187,22 @@ backend and everything else to the frontend.
 
 ## 8. Synthetic demo telemetry
 
-`deploy/demo-prometheus.yml` is the scrape configuration of the optional
-`demo-prometheus` service (`--profile monitoring-demo`). It reuses the existing
-exporter → Prometheus chain: no new platform, no `remote_write`, no alerting and
-no rule files, so the demonstration can never notify anyone or reach a real
-target.
+Enable `--profile monitoring-demo` with the demo overlay. Prometheus uses the
+private Compose network, no published port and disposable tmpfs storage. The API
+queries `http://demo-prometheus:9090`; no host gateway or volume access is needed.
 
-- the demo exporter binds `127.0.0.1` only, so Prometheus has to share the host
-  network namespace, exactly as documented in `backend/docs/demo.md`; that is
-  why the service uses `network_mode: host` and no port mapping.
-- it listens only on `127.0.0.1:19190`; the storage path is a tmpfs (synthetic
-  and disposable). This sample is deliberately not exposed to the LAN. The
-  backend container cannot reach that host-loopback listener; an isolated
-  exporter/scraper network and regenerated targets remain required integration
-  work. The configured host-gateway URL is not evidence of a working dashboard.
-- the checked-in file is a **shape sample**: its asset UUID is not a real demo
-  asset, so the target stays down instead of inventing data. Replace it, at the
-  same path, with the output of
-  `python -m itsm.demo setup --directory <demo data dir> --username demo.owner
-  --exporter-port 19101 --output deploy/demo-prometheus.yml`, and regenerate it
-  after a demo reseed because asset identifiers change with the dataset.
-- the exporter itself runs on the host as documented
-  (`python -m itsm.demo exporter --directory <demo data dir> --port 19101`), not
-  as a Compose service.
+`deploy/demo-prometheus.yml` discovers targets every 15 seconds through
+`/api/v1/demo/telemetry/targets`. Each current fictional node carries `asset_id`,
+`check_type=node`, `module=node` and a per-asset `__metrics_path__`. Metrics use
+existing synthetic node exposition, never host/device measurements. Reset
+recreates node monitoring profiles; discovery follows the new UUIDs and old
+metric paths return 404. The routes exist only in a persisted demo installation.
+The standalone legacy demo initializer/exporter still requires explicit setup.
 
-**Gap:** the exporter needs a host path to the demo data directory, which lives
-in the `itsm-demo_demo-data` volume. The complete dashboard → Prometheus →
-exporter path is therefore not proven end to end; see the limits below.
+No alerting, rules or remote_write are configured. No providers or external
+notification channels are enabled. Local real-Prometheus scrape verification
+uses an already-installed image with `--pull=never`; this is separate from proof
+of the full Compose installation or browser Dashboard.
 
 ## 9. What differs between the modes
 

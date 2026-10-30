@@ -41,6 +41,16 @@ def main():
         if mode == "prod":
             assert services["initialize"]["image"] == "itsm-ops:0.1.0"
             assert any(v["target"] == "/data/backups" for v in services["initialize"]["volumes"])
+            api_volumes = services["backend"]["volumes"]
+            assert not any(v["target"] == "/data/backups" for v in api_volumes)
+            status_mount = next(v for v in api_volumes if v["target"] == "/data/backup-status")
+            assert status_mount["read_only"] is True
+            assert services["backend"]["environment"]["ITSM_BACKUP_STATUS_PATH"] == (
+                "/data/backup-status/status.json"
+            )
+            assert services["initialize"]["environment"]["ITSM_OPS_STATUS_PATH"] == (
+                "/data/backup-status/status.json"
+            )
         volumes.append({value["name"] for value in model.get("volumes", {}).values()})
         print(f"PASS {mode}: project, gate, mode and maintenance isolation")
     assert not any(a & b for i, a in enumerate(volumes) for b in volumes[i + 1:])
