@@ -75,7 +75,7 @@ Para ensayar una recuperación: elige una ventana de mantenimiento, coordina esc
 
 Un módulo aprobado es **código nativo de confianza**, no un sandbox contra código hostil: su Python corre en el proceso de la aplicación y su Vue en el mismo origen. La validación de desarrollo ocurre en un contenedor offline fijo; después, una persona con rol Superadmin revisa versión y digest exactos, avisos, permisos nuevos, plan de migración y compatibilidad de rollback, y aprueba explícitamente. Editar el código exige un digest nuevo, validación y aprobación nuevas. Deshabilitar un módulo bloquea sus operaciones, retira sus contribuciones y detiene la agenda **sin borrar datos**. La autorización de backend sigue vigente para toda operación del módulo.
 
-La composición de interfaz por SDK (agregar, ocultar o reemplazar navegación, páginas, widgets y acciones) es un candidato todavía no publicado: no la anuncies como activada en esta instalación. Ver [extensions-sdk.md](../backend/docs/extensions-sdk.md) y [frontend/docs/extensions-sdk.md](../frontend/docs/extensions-sdk.md).
+La composición de interfaz por SDK permite agregar, ocultar o reemplazar navegación, páginas, widgets, paneles y acciones de negocio mediante contribuciones declaradas. Está integrada en esta rama de desarrollo y requiere una extensión validada, aprobada y habilitada; no implica un despliegue ni una publicación. Login, permisos, recuperación de extensiones y operaciones de sistema siguen siendo superficies del core. Ver [extensions-sdk.md](../backend/docs/extensions-sdk.md) y [frontend/docs/extensions-sdk.md](../frontend/docs/extensions-sdk.md).
 
 ## Operaciones de Superadmin
 
