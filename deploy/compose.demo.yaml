@@ -63,6 +63,10 @@ services:
   backend:
     environment: *demo-environment
     <<: *demo-volumes
+    # The launcher derives uvicorn's proxy-header trust from ITSM_TRUSTED_PROXY.
+    # A bare `uvicorn itsm.main:app` already trusts X-Forwarded-For from a
+    # loopback peer, letting a visitor mint a fresh rate-limit bucket (R1-02).
+    command: [python, -m, itsm.main, --host, 0.0.0.0, --port, "8000", --no-access-log]
 
   # Refused by the shared-reset contract. Kept only so an operator sees why it
   # must stay off; the profile name states the intent.
