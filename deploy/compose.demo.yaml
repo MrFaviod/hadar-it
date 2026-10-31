@@ -49,6 +49,11 @@ x-demo-environment: &demo-environment
   ITSM_MEILISEARCH_URL: ""
   ITSM_MEILISEARCH_API_KEY: ""
   ITSM_TASK_POSTGRES_DSN: ""
+  # Public visitor credential for the demonstration owner account. It is not a
+  # secret: `admin`/`admin` is the documented public login of a fictional
+  # installation, it exists only in demo mode, and the initializer refuses a
+  # production environment before it creates any state.
+  ITSM_BOOTSTRAP_PASSWORD: ${ITSM_DEMO_ADMIN_PASSWORD:-admin}
 
 x-demo-volumes: &demo-volumes
   # The inherited app/tasks/attachments volumes are replaced on purpose: the
@@ -59,6 +64,24 @@ services:
   initialize:
     environment: *demo-environment
     <<: *demo-volumes
+    # The initializer refuses an existing directory and the image does not
+    # pre-create it, so a first start creates the demonstration, and every later
+    # start only re-checks migrations. A directory that exists without its
+    # database is a broken installation: fail loudly instead of serving 503.
+    command:
+      - sh
+      - -c
+      - |
+        set -eu
+        if [ -e /data/demo ]; then
+          [ -f /data/demo/demo.db ] || {
+            echo "demo: /data/demo exists without demo.db; inspect it or choose a new data volume" >&2
+            exit 1
+          }
+        else
+          python -m itsm.demo init --directory /data/demo --username admin
+        fi
+        python -m itsm.deployment prepare
 
   backend:
     environment: *demo-environment
