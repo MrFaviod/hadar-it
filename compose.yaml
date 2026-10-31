@@ -56,6 +56,8 @@ x-backend: &backend
     ITSM_SYSTEM_EXECUTOR_TIMEOUT_SECONDS: ${ITSM_SYSTEM_EXECUTOR_TIMEOUT_SECONDS:-10}
     # Dedicated fixed host validator; application containers never mount Docker.
     ITSM_EXTENSION_WORKSPACE_PATH: /data/app/extension-workspaces
+    # One private SQLite file per extension; never the core database.
+    ITSM_EXTENSION_DATA_PATH: /data/app/extension-data
     ITSM_EXTENSION_VALIDATOR_URL: ${ITSM_EXTENSION_VALIDATOR_URL:-}
     ITSM_EXTENSION_VALIDATOR_TOKEN: ${ITSM_EXTENSION_VALIDATOR_TOKEN:-}
     ITSM_EXTENSION_VALIDATOR_IMAGE: ${ITSM_EXTENSION_VALIDATOR_IMAGE:-itsm-extension-validator:1}

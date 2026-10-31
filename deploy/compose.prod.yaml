@@ -74,6 +74,8 @@ services:
       ITSM_DATABASE_URL: ${ITSM_DATABASE_URL:?Set ITSM_DATABASE_URL to the production database}
       ITSM_OPS_BACKUP_ROOT: /data/backups
       ITSM_OPS_STATUS_PATH: /data/backup-status/status.json
+      # Extension databases are part of every artifact (read-only mount).
+      ITSM_EXTENSION_DATA_PATH: /data/app/extension-data
       ITSM_OPS_RETENTION_KEEP: ${ITSM_OPS_RETENTION_KEEP:-7}
       ITSM_OPS_BACKUP_INTERVAL_SECONDS: ${ITSM_OPS_BACKUP_INTERVAL_SECONDS:-86400}
       ITSM_LOG_LEVEL: ${ITSM_LOG_LEVEL:-INFO}

@@ -22,6 +22,8 @@ x-dev-environment: &dev-environment
   ITSM_TASK_STORAGE: sqlite
   ITSM_TASK_SQLITE_PATH: /data/dev/tasks/huey.db
   ITSM_ATTACHMENT_STORAGE_PATH: /data/dev/attachments
+  ITSM_EXTENSION_WORKSPACE_PATH: /data/dev/extension-workspaces
+  ITSM_EXTENSION_DATA_PATH: /data/dev/extension-data
   # Local safety input for `python -m itsm.devtools status|reset`; a reset
   # refuses any path outside a development directory or this one.
   ITSM_DEV_DATA_DIR: /data/dev
