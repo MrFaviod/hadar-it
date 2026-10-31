@@ -58,7 +58,10 @@ x-demo-environment: &demo-environment
 x-demo-volumes: &demo-volumes
   # The inherited app/tasks/attachments volumes are replaced on purpose: the
   # whole demonstration state must live under the owned data directory.
-  volumes: !override [demo-data:/data/demo]
+  # Mounted at /data and not at /data/demo on purpose: Docker creates the mount
+  # point itself, and `python -m itsm.demo init` refuses an existing directory.
+  # The initializer therefore creates /data/demo (its parent already exists).
+  volumes: !override [demo-data:/data]
 
 services:
   initialize:
