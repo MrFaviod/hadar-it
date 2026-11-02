@@ -161,10 +161,15 @@ backup before migrating, and stops on failure with the exact restore command.
   default, minimum interval 60 s.
 - `RELEASE_MODE=prod` is enforced by the command itself, so the service fails
   instead of writing artifacts when started in another mode.
-- the generic ops image ships Debian `postgresql-client`, `mariadb-client` and
-  `unixodbc`, and **no `sqlcmd`**: SQL Server backups are not runnable from it.
-  Its PostgreSQL client major must match the server major (PG 16 servers need a
-  PG 16 tool image, which this generic image does not guarantee).
+- the ops recipe imports `pg_dump` and `pg_restore` plus private shared libraries
+  from the same digest-pinned PostgreSQL **16.13** image as the local server.
+  `POSTGRES_CLIENT_IMAGE` is a build argument in `backend/Dockerfile.ops`, but
+  overriding it to another release (including 16.14) is deliberately refused.
+  Build-time checks reject failed library audits and non-16.13 tools; a real
+  image build and isolated dump/restore are still required before claiming
+  compatibility. The backend base is a local tag, and Debian `mariadb-client`
+  and `unixodbc` packages remain unpinned: this is not full OS reproducibility.
+  There is **no `sqlcmd`**: SQL Server backups are not runnable from this image.
 - `GET /api/v1/system/backups/status` requires reserved `system.view` authority.
   Ops publishes a sanitized atomic summary to `ITSM_OPS_STATUS_PATH`; the API
   reads `ITSM_BACKUP_STATUS_PATH` from a separate read-only status volume.

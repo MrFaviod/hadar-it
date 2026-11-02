@@ -60,9 +60,10 @@ services:
       context: ./backend
       # FROM itsm-backend:0.1.0. Build the application image first:
       #   docker compose ... build backend
-      # The generic image ships Debian postgresql-client, mariadb-client and
-      # unixodbc. It carries no sqlcmd, and its PostgreSQL client major must
-      # match the server; see docs/release-modes-deployment.md.
+      # PostgreSQL archive clients come from the digest-pinned 16.13 donor
+      # (POSTGRES_CLIENT_IMAGE in Dockerfile.ops); other releases are refused.
+      # MariaDB/unixodbc still use Debian apt; sqlcmd is absent.
+      # See docs/release-modes-deployment.md for verification limits.
       dockerfile: Dockerfile.ops
     profiles: [backup]
     init: true
