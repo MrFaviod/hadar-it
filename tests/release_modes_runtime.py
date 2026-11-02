@@ -517,8 +517,8 @@ def _check_render(model: dict, mode: str, project: str, api_port: int, frontend_
         for name in ("initialize", "backend"):
             mounts = _mount_targets(services[name])
             _expect(
-                set(mounts) == {"/data/demo"},
-                f"demo: {name} mounts only the mode-owned /data/demo volume",
+                set(mounts) == {"/data"},
+                f"demo: {name} mounts only the mode-owned /data parent volume",
             )
         settings = services["backend"]["environment"]
         _expect(
