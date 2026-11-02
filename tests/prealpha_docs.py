@@ -29,6 +29,13 @@ COMPOSE_FILES = {
     "demo": "deploy/compose.demo.yaml",
 }
 
+# Same base tag and digest as frontend/Dockerfile; the final frontend image
+# additionally contains application files.
+NGINX_TLS_IMAGE = (
+    "nginx:1.28.3-alpine@sha256:"
+    "a8b39bd9cf0f83869a2162827a0caf6137ddf759d50a171451b335cecc87d236"
+)
+
 COMMAND_START = re.compile(
     r"^(docker |export |RELEASE_MODE=|COMPOSE_FILE=|\.venv/bin/python|python |python3 |"
     r"curl |npm |ITSM_[A-Z_]+=|--|\.\s|cd )"
@@ -84,6 +91,22 @@ def command_entries(text: str) -> list[tuple[str, str]]:
 
 def compose_lines(text: str) -> list[str]:
     return [line for line in command_lines(text) if line.startswith("docker compose")]
+
+
+def service_image(service: str, relative: str = "compose.yaml") -> str:
+    """Image reference of one Compose service, from its top-level block."""
+    lines = read(relative).splitlines()
+    header = f"  {service}:"
+    for index, line in enumerate(lines):
+        if line.rstrip() != header:
+            continue
+        for following in lines[index + 1 :]:
+            if following.strip() and not following.startswith("    "):
+                break
+            if following.startswith("    image:"):
+                return following.split("image:", 1)[1].strip().strip("\"'")
+        break
+    return ""
 
 
 def check(name: str, condition: bool, detail: str = "") -> None:
@@ -304,6 +327,25 @@ def check_demo_mount_documentation() -> None:
     )
 
 
+def check_optional_tls_image_pinned() -> None:
+    """The optional TLS proxy must use one exact nginx tag and digest.
+
+    A floating tag such as ``nginx:1.29-alpine`` resolves to different bytes on
+    every pull, so the same release would not be reproducible.
+    """
+    image = service_image("proxy")
+    check(
+        "optional TLS proxy pins the exact nginx image",
+        image == NGINX_TLS_IMAGE,
+        f"proxy image is {image or 'missing'}, expected {NGINX_TLS_IMAGE}",
+    )
+    check(
+        "optional TLS proxy image carries a digest",
+        "@sha256:" in image and not image.endswith(":latest"),
+        "the proxy image must be tag@sha256:… rather than a floating tag",
+    )
+
+
 def check_referenced_overlays_exist() -> None:
     pattern = re.compile(r"deploy/compose\.[a-z]+\.yaml")
     for relative in (README, MODE_DOC, *OPS_PAIR, *USER_PAIR):
@@ -348,6 +390,7 @@ def main() -> int:
         check_user_operations_documents()
         check_translated_command_parity()
         check_demo_mount_documentation()
+        check_optional_tls_image_pinned()
         check_referenced_overlays_exist()
         check_root_links_exist()
     except AssertionError as error:
