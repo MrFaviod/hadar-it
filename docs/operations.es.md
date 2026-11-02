@@ -669,7 +669,7 @@ ITSM_TEST_API_URL=http://127.0.0.1:18080 python3 tests/inventory.py
 ```
 
 Las pruebas del backend y la evidencia de integración están documentadas en backend/README.md y
-`odd/tasks/phase-1.md`. El envío de tareas de demo es solo para desarrollo, no un servicio público
+en un registro local no publicado. El envío de tareas de demo es solo para desarrollo, no un servicio público
 de ejecución de tareas sin autenticación. Vincula a loopback y exige un límite de autorización
 adecuado antes de exponer datos o acciones de negocio reales. Sin migración automática de esquema
 en las comprobaciones de salud y sin valores sensibles de URL o secretos en logs ni errores.

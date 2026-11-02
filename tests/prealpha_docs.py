@@ -2,7 +2,8 @@
 """Documentation consistency checks for the first public pre-alpha entry docs.
 
 The checks are static and read-only: they read the Markdown and the Compose files
-in this repository. Nothing is built, pulled, started or written. Command evidence
+in this repository and ask read-only ``git ls-files`` / ``git check-ignore`` which
+files are published. Nothing is built, pulled, started or written. Command evidence
 for the rendered projects is produced separately with
 ``docker compose --env-file /dev/null … config``; this script only guarantees that
 the documented commands keep naming the files, modes and variables that actually
@@ -14,6 +15,7 @@ Exit codes: ``0`` all checks passed, ``1`` a check failed.
 from __future__ import annotations
 
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -382,6 +384,61 @@ def check_root_links_exist() -> None:
             )
 
 
+# Local records that are never published; published docs must not point at them.
+LOCAL_RECORD_REFERENCE = re.compile(r"(?<![\w.-])(?:odd/|AGENTS\.md\b|docs/reviews/)")
+LOCAL_ONLY_PATHS = (
+    "AGENTS.md",
+    "SYSTEM.md",
+    "odd/sample.md",
+    "docs/reviews/sample.md",
+    ".omp/sample",
+    ".publish/sample",
+    ".verification/sample",
+)
+# Same-named paths below the root, and new public docs, must stay addable.
+PUBLISHABLE_PATHS = (
+    "docs/new-public-doc.md",
+    "docs/odd/sample.md",
+    "scripts/odd/sample.py",
+    "docs/SYSTEM.md",
+    "docs/AGENTS.md",
+)
+
+
+def git(*args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", "-C", str(ROOT), *args], capture_output=True, text=True, check=False
+    )
+
+
+def is_ignored(relative: str) -> bool:
+    return git("check-ignore", "-q", "--no-index", relative).returncode == 0
+
+
+def check_no_local_record_references() -> None:
+    """Tracked root docs must not link or point at unpublished local records."""
+    tracked = git("ls-files", "--", README, "docs/*.md").stdout.split()
+    found = [
+        f"{relative}:{number}"
+        for relative in tracked
+        for number, line in enumerate(read(relative).splitlines(), start=1)
+        if LOCAL_RECORD_REFERENCE.search(line)
+    ]
+    check(
+        "published docs do not reference unpublished local records",
+        not found,
+        ", ".join(found),
+    )
+
+
+def check_local_only_ignore_rules() -> None:
+    """Local-only rules stay anchored at the root without hiding public docs."""
+    for relative in LOCAL_ONLY_PATHS:
+        check(f".gitignore keeps {relative} local", is_ignored(relative), "not ignored")
+    for relative in PUBLISHABLE_PATHS:
+        check(f".gitignore lets {relative} be added", not is_ignored(relative), "ignored")
+
+
 def main() -> int:
     try:
         check_entry_documents()
@@ -393,6 +450,8 @@ def main() -> int:
         check_optional_tls_image_pinned()
         check_referenced_overlays_exist()
         check_root_links_exist()
+        check_local_only_ignore_rules()
+        check_no_local_record_references()
     except AssertionError as error:
         print(f"FAIL {error}", file=sys.stderr)
         return 1

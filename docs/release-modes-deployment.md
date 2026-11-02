@@ -99,7 +99,7 @@ using plain `docker compose --env-file /dev/null …` commands.
 ## 4. Variables per mode
 
 Documented, not shipped: this repository contains no `.env` file and no
-substitute for one (see root `AGENTS.md`). Use the process environment.
+substitute for one. Use the process environment.
 
 | Variable | `dev` | `prod` | `demo` |
 |---|---|---|---|

@@ -1,6 +1,6 @@
 # Unnamed ITSM project — pre-alpha
 
-Modular-monolith foundation for small IT teams. The project has no approved product name; “Asset Manager” is the frontend's inherited demo label. Phase 1 supplies infrastructure; Phase 2 adds real identity, sessions and service-level Casbin authorization. Phase 3 adds the first SQL inventory and shared REST/agent/MCP vertical slice. Phase 4 completes the asset core with configurable forms, atomic identification, lifecycle/history and images in the existing Vue views. Phase 5 adds inventory people and departments, hierarchical locations, assignments and transfers, directed physical/virtual relationships, structured history, bounded maps/graphs and descriptive replica groups (active/passive or configured workload shares such as 40:60). See [Phase 5 verification](docs/phase-5-validation.md) and its [implementation record](odd/tasks/phase-5.md) for executed checks, corrections and explicit limits. [Phase 4 verification](docs/phase-4-validation.md) records the earlier asset-core foundation.
+Modular-monolith foundation for small IT teams. The project has no approved product name; “Asset Manager” is the frontend's inherited demo label. Phase 1 supplies infrastructure; Phase 2 adds real identity, sessions and service-level Casbin authorization. Phase 3 adds the first SQL inventory and shared REST/agent/MCP vertical slice. Phase 4 completes the asset core with configurable forms, atomic identification, lifecycle/history and images in the existing Vue views. Phase 5 adds inventory people and departments, hierarchical locations, assignments and transfers, directed physical/virtual relationships, structured history, bounded maps/graphs and descriptive replica groups (active/passive or configured workload shares such as 40:60). See [Phase 5 verification](docs/phase-5-validation.md) for executed checks, corrections and explicit limits. [Phase 4 verification](docs/phase-4-validation.md) records the earlier asset-core foundation.
 
 ## Phase 6 verified integration
 
@@ -10,8 +10,7 @@ individual warranties are connected to the existing Vue interfaces. Long-running
 operations use the existing Huey adapter with persisted progress and retry receipts;
 REST, Pydantic AI and FastMCP share canonical services.
 
-See the [Phase 6 implementation record](odd/tasks/phase-6.md),
-[executed evidence and limits](docs/phase-6-validation.md),
+See [executed evidence and limits](docs/phase-6-validation.md),
 [backend contracts](backend/docs/phase6-workflows.md) and
 [incumbent frontend integration](frontend/docs/phase6-workflows.md).
 The backend checkpoint is `af4cc27`: 549 tests passed, six gated skips and two known
@@ -40,8 +39,7 @@ SQL search is the default. Optional Meilisearch adds relevance with a durable
 outbox, Huey synchronization/retries and rebuild; results are reauthorized from
 SQL and engine loss falls back to SQL. It is not a primary data source.
 
-See [Phase 10 implementation](odd/tasks/phase-10.md),
-[executed validation and limits](docs/phase-10-validation.md), and
+See [executed validation and limits](docs/phase-10-validation.md) and
 [optional-service configuration](docs/operations.md).
 
 ## Phase 11 integration and operational validation
@@ -62,8 +60,7 @@ now feed the existing IA configuration and conversation balances. Usage reports
 preserve measured/estimated/unavailable evidence; unknown outcomes retain holds.
 Managed native runs use a scoped gateway and disposable profiles, but remain
 honestly admission-only without verified input bounds and network isolation.
-See [executed evidence, known failures and operating prerequisites](docs/ai-usage-quotas-validation.md)
-and the [approved feature record](odd/tasks/ai-usage-quotas.md).
+See [executed evidence, known failures and operating prerequisites](docs/ai-usage-quotas-validation.md).
 
 ## Native application extensions
 
@@ -222,4 +219,4 @@ See [Phase 11](docs/phase-11-validation.md) for the current executed SQL/queue m
 
 ## Development rules
 
-Follow [AGENTS.md](AGENTS.md) plus the component instructions: ODD, all relevant skills for parent/subagents, simple solutions, related Conventional Commits, independent versions, and different worktrees for simultaneous code-writing subagents. No slogans, invented product claims or speculative infrastructure. Secrets stay outside Git and logs. Docker verification must use isolated project names, ports and volumes rather than modifying existing server stacks.
+Contributor and agent workflow instructions are kept locally and are not part of the published repository. In short: ODD, all relevant skills for parent/subagents, simple solutions, related Conventional Commits, independent versions, and different worktrees for simultaneous code-writing subagents. No slogans, invented product claims or speculative infrastructure. Secrets stay outside Git and logs. Docker verification must use isolated project names, ports and volumes rather than modifying existing server stacks.

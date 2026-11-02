@@ -3,23 +3,17 @@
 /.worktrees/
 /.atl/
 /.codegraph/
-/.verification/
 *.local
 .env
 .env.*
 __pycache__/
 *.py[cod]
-.omp
-odd
-.publish
-SYSTEM.md
-docs/*
 
 # Local coordination and publication scratch (never ship these artifacts).
 /AGENTS.md
+/SYSTEM.md
 /odd/
 /docs/reviews/
+/.omp/
 /.publish/
 /.verification/
-# Explicit public readiness report despite the local docs/* exclusion.
-!/docs/prealpha-readiness.md
