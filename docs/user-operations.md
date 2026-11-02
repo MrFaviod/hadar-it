@@ -1,3 +1,5 @@
+English: [user-operations.en.md](user-operations.en.md)
+
 # Operación avanzada de la instalación
 
 Guía breve para quien administra el servidor: instalación, respaldos, módulos externos y operaciones del Superadmin. Para el uso diario de inventario, incidentes y reportes, la [ayuda integrada](../frontend/docs/user-help.md) alcanza; este documento no la repite. Los detalles de infraestructura, variables y verificaciones ya ejecutadas viven en [operations.md](operations.md), que es la fuente de verdad operativa.
