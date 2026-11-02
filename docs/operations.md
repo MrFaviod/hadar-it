@@ -8,6 +8,20 @@ Run commands from `asset/`. Root Compose references the two independent componen
 
 The human selected documentation of variables instead of creating `.env` / `.env.example`. Commands explicitly disable Compose's implicit `.env` loading. Supply variables via the calling environment or your approved external secret-management mechanism; do not put production credentials in Git, terminal transcripts or example files. URL-encode credentials in database URLs. Container environment is visible to Docker administrators: this is not a secret vault.
 
+Every Compose command in this document runs in one installation shell where the release
+mode and its overlay are already exported. The mode is mandatory: it names the Compose
+project and its volumes, and an absent value fails interpolation instead of guessing.
+
+```bash
+# Example for a production installation. Use deploy/compose.dev.yaml or
+# deploy/compose.demo.yaml (with RELEASE_MODE=dev|demo) for the other modes.
+export RELEASE_MODE=prod
+export COMPOSE_FILE=compose.yaml:deploy/compose.prod.yaml
+```
+
+Per-mode databases, origins, preparation behavior, the TLS entrypoint and the unproven
+parts are in [release-mode deployment](release-modes-deployment.md).
+
 | Variable | Default / meaning |
 |---|---|
 | `ITSM_AUTH_ORIGIN` | Exact browser origin; Compose default http://localhost:18080. Match the browser hostname. |
@@ -90,36 +104,35 @@ hit, and outages retain SQL search. Existing PostgreSQL configuration is optiona
 Supply `ITSM_POSTGRES_PASSWORD` externally first, then:
 
 ```bash
+export ITSM_POSTGRES_PASSWORD=<external password>
+export ITSM_DATABASE_URL="postgresql+psycopg://itsm:${ITSM_POSTGRES_PASSWORD}@postgres:5432/itsm"
+export ITSM_AUTH_ORIGIN=https://itsm.example.com   # exact browser origin; prod cookies are Secure
 docker compose --env-file /dev/null --profile local-postgres up -d --wait postgres
 docker compose --env-file /dev/null build backend frontend
-docker compose --env-file /dev/null run --rm migrate
-# Supply ITSM_BOOTSTRAP_PASSWORD externally; choose account details:
+docker compose --env-file /dev/null up -d
+# After `initialize` (`python -m itsm.deployment prepare`) succeeds, create the first owner:
 docker compose --env-file /dev/null run --rm -e ITSM_BOOTSTRAP_PASSWORD backend \
   python -m itsm.identity.cli bootstrap-superadmin --username YOUR_USERNAME --name 'Your installation owner'
-# Only for local plain HTTP; production must retain secure cookies with HTTPS:
-export ITSM_AUTH_ORIGIN=http://127.0.0.1:18080 ITSM_AUTH_COOKIE_SECURE=false
-docker compose --env-file /dev/null up -d --wait backend worker frontend
 ```
 
-Migrations run explicitly once before API readiness, not concurrently from API/worker entrypoints. Frontend: `http://127.0.0.1:18080`; API OpenAPI: `http://127.0.0.1:18000/docs`. Basic services do not require Redis, Meilisearch or Prometheus.
+`initialize` applies migrations once before API readiness; API and worker entrypoints never
+migrate concurrently, and the `tools`-profile `migrate` service stays a manual fallback, not
+an installation step. Frontend: `http://127.0.0.1:18080`; API OpenAPI: `http://127.0.0.1:18000/docs`. Basic services do not require Redis, Meilisearch or Prometheus. For a plain-HTTP local trial use `dev` mode, whose overlay sets non-Secure cookies; `prod` keeps `Secure` cookies and expects an HTTPS origin.
 
 ### External main SQL / persistent SQLite
 
-Provide `ITSM_DATABASE_URL` for the chosen external database; omit `local-postgres`. Example non-secret local SQLite selection:
+Provide `ITSM_DATABASE_URL` for the chosen external database; omit `local-postgres`. Example non-secret local SQLite selection inside the production project:
 
 ```bash
 export ITSM_DATABASE_URL=sqlite:////data/app/itsm.db
 docker compose --env-file /dev/null build backend frontend
-docker compose --env-file /dev/null run --rm migrate
-# Supply ITSM_BOOTSTRAP_PASSWORD externally; choose account details:
+docker compose --env-file /dev/null up -d
+# After `initialize` (`python -m itsm.deployment prepare`) succeeds, create the first owner:
 docker compose --env-file /dev/null run --rm -e ITSM_BOOTSTRAP_PASSWORD backend \
   python -m itsm.identity.cli bootstrap-superadmin --username YOUR_USERNAME --name 'Your installation owner'
-# Only for local plain HTTP; production must retain secure cookies with HTTPS:
-export ITSM_AUTH_ORIGIN=http://127.0.0.1:18080 ITSM_AUTH_COOKIE_SECURE=false
-docker compose --env-file /dev/null up -d --wait backend worker frontend
 ```
 
-SQLite main data persists in `app-data`; task queue/results in `task-data`; opaque files in `attachment-data`. These are Docker-managed named volumes, shared by API, migration and worker, without bind-only `:z`/`:Z` suffixes. All consumers must retain the installation's reserved `ITSM_SELINUX_LEVEL` as described above. Preserve SELinux labels on actual project bind mounts; never relabel host `/proc`, `/sys` or `/`. Queue SQLite must remain local to one Docker host, shared between API and worker, not NFS or a multi-host cluster. The default worker has one thread/process; scale only after testing queue/storage and business idempotency. Main SQL dialect configuration is not proof of live engine compatibility; consult the backend validation matrix.
+SQLite main data persists in `app-data`; task queue/results in `task-data`; opaque files in `attachment-data`. The `dev` and `demo` overlays replace these three mounts with one mode-owned directory: `/data/dev`, and `/data` holding the demo data directory `/data/demo`; see [mode-owned volumes](release-modes-deployment.md#2-one-project-and-one-volume-set-per-mode). These are Docker-managed named volumes, shared by API, migration and worker, without bind-only `:z`/`:Z` suffixes. All consumers must retain the installation's reserved `ITSM_SELINUX_LEVEL` as described above. Preserve SELinux labels on actual project bind mounts; never relabel host `/proc`, `/sys` or `/`. Queue SQLite must remain local to one Docker host, shared between API and worker, not NFS or a multi-host cluster. The default worker has one thread/process; scale only after testing queue/storage and business idempotency. Main SQL dialect configuration is not proof of live engine compatibility; consult the backend validation matrix.
 
 ### Installation ownership and controlled system operations
 
@@ -550,7 +563,7 @@ See `backend/docs/maintenance.md`, `backend/docs/interventions.md` and
 1. Record all three Git revisions, component versions and image digests. Back up main DB and queue before schema/library changes.
 2. Review release/security notes, update related pinned dependencies/base image digest, rebuild and run adapter/API/worker/migration tests in isolated state.
 3. Test migrations against available SQL engines; do not advertise untested engines as verified. Apply a maintenance window when schema changes are not backward-compatible.
-4. Run migrations explicitly, then recreate API/worker together using the tested image. Check readiness and demo task/result.
+4. Run the preparation gate (`initialize`, which runs `python -m itsm.deployment prepare`: the guarded upgrade in `prod`, migrations elsewhere) or the manual `tools`-profile `migrate` fallback, then recreate API/worker together using the tested image. Check readiness and demo task/result.
 5. Keep prior image/lock. Reverting the image does not undo an irreversible migration; recover the backup if the migration cannot be safely reversed. Never run `downgrade` or restore into live data without an explicit recovery decision.
 
 Images use exact version tags and registry digests, not `latest`. Dependencies are pinned by the backend lock and frontend package lock. No automatic updater, orchestrator, release pipeline or business microservices are required.
@@ -572,6 +585,7 @@ Images use exact version tags and registry digests, not `latest`. Dependencies a
 ## Checks and inspection
 
 ```bash
+# Renders this installation's project: RELEASE_MODE and COMPOSE_FILE are already exported.
 docker compose --env-file /dev/null config --quiet
 docker compose --env-file /dev/null --profile monitoring config --quiet
 # Prometheus config/rules; point the token mount at the same external file the engine uses.

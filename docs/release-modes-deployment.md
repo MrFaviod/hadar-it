@@ -49,13 +49,16 @@ directory or a task queue:
 |---|---|---|---|
 | `dev` | `itsm-dev` | SQLite `/data/dev/dev.db` | `itsm-dev_dev-data` → `/data/dev` |
 | `prod` | `itsm-prod` | external `ITSM_DATABASE_URL` (or the `local-postgres` profile) | `itsm-prod_app-data`, `…_task-data`, `…_attachment-data`, `…_backup-data` |
-| `demo` | `itsm-demo` | SQLite `/data/demo/demo.db` | `itsm-demo_demo-data` → `/data/demo` |
+| `demo` | `itsm-demo` | SQLite `/data/demo/demo.db` | `itsm-demo_demo-data` → `/data` (the data directory is `/data/demo` inside it) |
 
 `dev` and `demo` deliberately replace the inherited `app-data` / `task-data` /
 `attachment-data` mounts with one owned directory each (`!override` in the
 overlay), because their reset/preparation code requires storage under a single
-validated root. The existing `migrate` service stays a manual `tools`-profile
-command and is not part of any mode flow.
+validated root. The demo volume is mounted at `/data`, not at `/data/demo`: Docker
+creates the mount point itself, and `python -m itsm.demo init` refuses an existing
+directory, so the initializer creates `/data/demo` while its parent already exists.
+The existing `migrate` service stays a manual `tools`-profile command and is not part
+of any mode flow.
 
 ## 3. Starting a mode
 
@@ -83,6 +86,15 @@ docker compose --env-file /dev/null -f compose.yaml -f deploy/compose.demo.yaml 
 Optional profiles: `tls` (HTTPS entrypoint), `backup` (prod backups),
 `monitoring-demo` (synthetic telemetry), plus the existing `local-postgres`,
 `redis`, `search`, `monitoring*` and `tools` profiles.
+
+On a fresh checkout, build `backend` before a production `up`: the production
+`initialize` image is `itsm-ops:0.1.0`, built `FROM itsm-backend:0.1.0` (section 6).
+Preparation itself is the `initialize` service: `up` starts it in front of `backend`
+and `worker`, and production creates no accounts, so the first owner is a separate
+`bootstrap-superadmin` command documented in the root [README](../README.md#start-locally).
+After the first installation, an operator shell can export
+`COMPOSE_FILE=compose.yaml:deploy/compose.prod.yaml` next to `RELEASE_MODE` and keep
+using plain `docker compose --env-file /dev/null …` commands.
 
 ## 4. Variables per mode
 

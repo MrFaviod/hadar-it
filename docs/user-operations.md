@@ -24,29 +24,34 @@ El nombre definitivo sigue pendiente y no se reemplaza por decisión unilateral.
 
 ## Instalación
 
-1. **Nivel SELinux por instalación.** Reserva categorías MCS propias y expórtalas como `ITSM_SELINUX_LEVEL` antes de cualquier comando de Compose; cada instalación usa un nivel distinto. Ver [operations.md](operations.md#reserve-the-shared-volume-selinux-domain).
-2. **Secretos fuera de archivos.** No hay `.env` ni `.env.example`: exporta las variables desde el entorno o tu gestor de secretos aprobado y ejecuta Compose con `--env-file /dev/null`. Nunca pongas credenciales en Git, en capturas de terminal ni en documentación.
-3. **Migración explícita antes de la API y del worker.** La migración nunca corre al arrancar cada proceso. Desde la raíz:
+1. **Primero el modo de release.** `RELEASE_MODE` es obligatorio: nombra el proyecto Compose y sus volúmenes, y cada proceso se niega a arrancar sin él. Expórtalo junto con el overlay de ese modo y conserva ambos en la shell de la instalación.
 
    ```bash
-   docker compose --env-file /dev/null run --rm migrate
+   export RELEASE_MODE=prod
+   export COMPOSE_FILE=compose.yaml:deploy/compose.prod.yaml
    ```
 
-   El servicio `migrate` ejecuta `alembic upgrade head` ([compose.yaml](../compose.yaml)). No uses `downgrade` ni restaures sobre datos vivos sin una decisión de recuperación explícita.
-4. **Primer propietario explícito.** Ejecuta el siguiente comando desde `backend/`, con las variables de esa instalación ya configuradas. `bootstrap-superadmin` crea la cuenta inicial y se rechaza si ya existe cualquier identidad humana; no hay cuenta fija ni contraseña por defecto. La contraseña llega por `getpass` o `ITSM_BOOTSTRAP_PASSWORD`, nunca como argumento.
+   Usa `deploy/compose.dev.yaml` (`RELEASE_MODE=dev`) para una prueba local aislada o `deploy/compose.demo.yaml` (`RELEASE_MODE=demo`) para la demostración ficticia pública. Cada modo es un proyecto, red y conjunto de volúmenes separados; `dev` y `demo` reemplazan los montajes de datos compartidos por un único directorio propio. Variables, TLS y límites por modo: [release-modes-deployment.md](release-modes-deployment.md).
+2. **Nivel SELinux por instalación.** Reserva categorías MCS propias y expórtalas como `ITSM_SELINUX_LEVEL` antes de cualquier comando de Compose; cada instalación usa un nivel distinto. Ver [operations.md](operations.md#reserve-the-shared-volume-selinux-domain).
+3. **Secretos fuera de archivos.** No hay `.env` ni `.env.example`: exporta las variables desde el entorno o tu gestor de secretos aprobado y ejecuta Compose con `--env-file /dev/null`. Nunca pongas credenciales en Git, en capturas de terminal ni en documentación.
+4. **Preparación antes de la API y del worker.** El servicio `initialize` ejecuta `python -m itsm.deployment prepare` una vez, y `backend` y `worker` lo esperan con `service_completed_successfully`. En `dev` migra, reclama la base, crea el administrador de desarrollo explícito y siembra datos ficticios; en `prod` migra una base vacía o ejecuta la actualización protegida (preflight, respaldo verificado, Alembic, verificación posterior); en `demo` migra, reclama la base para la demostración y la siembra. Una preparación fallida detiene el proyecto. El servicio `migrate` (`alembic upgrade head`, perfil `tools`) es un recurso manual, no la ruta de instalación, y ningún proceso migra al arrancar. No uses `downgrade` ni restaures sobre datos vivos sin una decisión de recuperación explícita.
+5. **Primer propietario explícito.** `prod` no crea cuentas: `bootstrap-superadmin` crea la cuenta inicial y se rechaza si ya existe cualquier identidad humana; no hay cuenta fija ni contraseña por defecto. La contraseña llega por `getpass` o `ITSM_BOOTSTRAP_PASSWORD`, nunca como argumento. Después de que `initialize` termine bien:
 
    ```bash
-   .venv/bin/python -m itsm.identity.cli bootstrap-superadmin --username TU_USUARIO --name 'Tu nombre'
+   docker compose --env-file /dev/null run --rm -e ITSM_BOOTSTRAP_PASSWORD backend \
+     python -m itsm.identity.cli bootstrap-superadmin --username TU_USUARIO --name 'Tu nombre'
    ```
 
-   En una instalación existente sin propietario activo, la reclamación es `adopt-superadmin --username CUENTA_EXISTENTE`. Ver [identity.md](../backend/docs/identity.md#installation).
-5. **Origen y cookies.** `ITSM_AUTH_ORIGIN` debe coincidir exactamente con el origen del navegador; las cookies son `HttpOnly`, `SameSite=Strict` y `Secure` salvo el `false` explícito para HTTP local aislado. Toda mutación autenticada por cookie exige Origin y token CSRF; los clientes con bearer no llevan CSRF, pero conservan los mismos permisos.
+   `dev` y `demo` se preparan automáticamente (`dev.admin`, y el visitante público `admin`/`admin` de una instalación ficticia), así que no requieren bootstrap. En una instalación existente sin propietario activo, la reclamación es `adopt-superadmin --username CUENTA_EXISTENTE`. Ver [identity.md](../backend/docs/identity.md#installation).
+6. **Origen y cookies.** `ITSM_AUTH_ORIGIN` debe coincidir exactamente con el origen del navegador; las cookies son `HttpOnly`, `SameSite=Strict` y `Secure` salvo el `false` explícito del overlay `dev` en HTTP loopback. Una instalación pública necesita TLS (`--profile tls` o tu propio proxy) y un origen `https`. Toda mutación autenticada por cookie exige Origin y token CSRF; los clientes con bearer no llevan CSRF, pero conservan los mismos permisos.
 
 Roles: **Superadmin** ejerce además los códigos `system.*`; **Admin** administra el negocio sin `system.*`; **User** es de solo lectura por defecto. La administración nunca concede por encima de los permisos efectivos de quien la ejecuta, y se protegen el último Superadmin activo y los cambios de rol propio.
 
 ## Modo demostración
 
-La demo es una instalación ficticia y separada, nunca un seed de producción. El inicializador exige un directorio **nuevo** cuyo padre ya exista: rechaza cualquier directorio existente, incluido uno vacío, y no ofrece sobrescribir ni reiniciar. Solo puede usar su propia base `demo.db`, ignora `ITSM_DATABASE_URL` y se niega con `ITSM_ENVIRONMENT=production`.
+La forma publicable es el overlay demo de Compose: `RELEASE_MODE=demo` con `deploy/compose.demo.yaml`, una instalación ficticia compartida cuyo visitante público `admin`/`admin` está documentado, cuyas credenciales heredadas de proveedores, ejecutor, notificaciones y búsqueda quedan vacías, y que se reinicia cada 60 minutos dentro del proceso. Publícala solo con TLS y el origen público exacto en `ITSM_AUTH_ORIGIN`; ver [release-modes-deployment.md](release-modes-deployment.md) y [demo-public.md](../backend/docs/demo-public.md).
+
+El inicializador aislado de abajo sigue siendo la ruta de desarrollo para una demostración privada, nunca un seed de producción. Exige un directorio **nuevo** cuyo padre ya exista: rechaza cualquier directorio existente, incluido uno vacío, y no ofrece sobrescribir ni reiniciar. Solo puede usar su propia base `demo.db`, ignora `ITSM_DATABASE_URL` y se niega con `ITSM_ENVIRONMENT=production`.
 
 Desde `backend/`, con `ITSM_BOOTSTRAP_PASSWORD` suministrada explícitamente en el entorno y el directorio padre ya creado:
 

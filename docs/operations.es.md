@@ -8,6 +8,21 @@ Ejecuta los comandos desde `asset/`. El Compose de la raíz referencia los dos c
 
 La persona responsable eligió documentar las variables en lugar de crear `.env` / `.env.example`. Los comandos deshabilitan explícitamente la carga implícita de `.env` de Compose. Suministra las variables desde el entorno que invoca o desde tu mecanismo aprobado de gestión externa de secretos; no pongas credenciales de producción en Git, en transcripciones de terminal ni en archivos de ejemplo. Codifica con URL las credenciales de las URLs de base de datos. El entorno de los contenedores es visible para los administradores de Docker: esto no es una bóveda de secretos.
 
+Todos los comandos de Compose de este documento se ejecutan en una shell de instalación donde
+el modo de release y su overlay ya están exportados. El modo es obligatorio: nombra el
+proyecto Compose y sus volúmenes, y un valor ausente falla en la interpolación en lugar de
+adivinar.
+
+```bash
+# Example for a production installation. Use deploy/compose.dev.yaml or
+# deploy/compose.demo.yaml (with RELEASE_MODE=dev|demo) for the other modes.
+export RELEASE_MODE=prod
+export COMPOSE_FILE=compose.yaml:deploy/compose.prod.yaml
+```
+
+Las bases, orígenes, comportamiento de preparación, la entrada TLS y las partes no probadas
+por modo están en [despliegue por modo](release-modes-deployment.md).
+
 | Variable | Valor por defecto / significado |
 |---|---|
 | `ITSM_AUTH_ORIGIN` | Origen exacto del navegador; valor por defecto de Compose http://localhost:18080. Debe coincidir con el hostname del navegador. |
@@ -91,41 +106,43 @@ existente de PostgreSQL es opcional.
 Suministra primero `ITSM_POSTGRES_PASSWORD` de forma externa y después ejecuta:
 
 ```bash
+export ITSM_POSTGRES_PASSWORD=<external password>
+export ITSM_DATABASE_URL="postgresql+psycopg://itsm:${ITSM_POSTGRES_PASSWORD}@postgres:5432/itsm"
+export ITSM_AUTH_ORIGIN=https://itsm.example.com   # exact browser origin; prod cookies are Secure
 docker compose --env-file /dev/null --profile local-postgres up -d --wait postgres
 docker compose --env-file /dev/null build backend frontend
-docker compose --env-file /dev/null run --rm migrate
-# Supply ITSM_BOOTSTRAP_PASSWORD externally; choose account details:
+docker compose --env-file /dev/null up -d
+# After `initialize` (`python -m itsm.deployment prepare`) succeeds, create the first owner:
 docker compose --env-file /dev/null run --rm -e ITSM_BOOTSTRAP_PASSWORD backend \
   python -m itsm.identity.cli bootstrap-superadmin --username YOUR_USERNAME --name 'Your installation owner'
-# Only for local plain HTTP; production must retain secure cookies with HTTPS:
-export ITSM_AUTH_ORIGIN=http://127.0.0.1:18080 ITSM_AUTH_COOKIE_SECURE=false
-docker compose --env-file /dev/null up -d --wait backend worker frontend
 ```
 
-Las migraciones se ejecutan explícitamente una vez antes del readiness de la API, nunca de
-forma concurrente desde los entrypoints de la API y del worker. Frontend:
+`initialize` aplica las migraciones una vez antes del readiness de la API; los entrypoints de
+la API y del worker nunca migran de forma concurrente, y el servicio `migrate` del perfil
+`tools` sigue siendo un recurso manual, no un paso de instalación. Frontend:
 `http://127.0.0.1:18080`; OpenAPI de la API: `http://127.0.0.1:18000/docs`. Los servicios
-básicos no requieren Redis, Meilisearch ni Prometheus.
+básicos no requieren Redis, Meilisearch ni Prometheus. Para una prueba local por HTTP plano usa
+el modo `dev`, cuyo overlay desactiva las cookies `Secure`; `prod` conserva cookies `Secure` y
+espera un origen HTTPS.
 
 ### SQL principal externo / SQLite persistente
 
 Provee `ITSM_DATABASE_URL` para la base externa elegida; omite `local-postgres`. Ejemplo de
-selección local de SQLite sin secretos:
+selección local de SQLite sin secretos dentro del proyecto de producción:
 
 ```bash
 export ITSM_DATABASE_URL=sqlite:////data/app/itsm.db
 docker compose --env-file /dev/null build backend frontend
-docker compose --env-file /dev/null run --rm migrate
-# Supply ITSM_BOOTSTRAP_PASSWORD externally; choose account details:
+docker compose --env-file /dev/null up -d
+# After `initialize` (`python -m itsm.deployment prepare`) succeeds, create the first owner:
 docker compose --env-file /dev/null run --rm -e ITSM_BOOTSTRAP_PASSWORD backend \
   python -m itsm.identity.cli bootstrap-superadmin --username YOUR_USERNAME --name 'Your installation owner'
-# Only for local plain HTTP; production must retain secure cookies with HTTPS:
-export ITSM_AUTH_ORIGIN=http://127.0.0.1:18080 ITSM_AUTH_COOKIE_SECURE=false
-docker compose --env-file /dev/null up -d --wait backend worker frontend
 ```
 
 Los datos principales de SQLite persisten en `app-data`; la cola de tareas y sus resultados
-en `task-data`; los archivos opacos en `attachment-data`. Son volúmenes nombrados gestionados
+en `task-data`; los archivos opacos en `attachment-data`. Los overlays `dev` y `demo`
+reemplazan esos tres montajes por un único directorio propio del modo: `/data/dev`, y `/data`
+que contiene el directorio de datos demo `/data/demo`; ver [volúmenes por modo](release-modes-deployment.md#2-one-project-and-one-volume-set-per-mode). Son volúmenes nombrados gestionados
 por Docker, compartidos por API, migración y worker, sin sufijos `:z`/`:Z` solo para bind.
 Todos los consumidores deben conservar el `ITSM_SELINUX_LEVEL` reservado para la instalación
 como se describe arriba. Conserva las etiquetas SELinux en los bind mounts reales del
@@ -566,7 +583,7 @@ para los contratos de operación y permisos.
 1. Registra las tres revisiones de Git, las versiones de los componentes y los digests de imagen. Respalda la base principal y la cola antes de cambios de esquema o de bibliotecas.
 2. Revisa las notas de release y de seguridad, actualiza las dependencias fijadas y el digest de la imagen base relacionada, reconstruye y ejecuta las pruebas de adaptadores, API, worker y migración en estado aislado.
 3. Prueba las migraciones contra los motores SQL disponibles; no anuncies motores no probados como verificados. Aplica una ventana de mantenimiento cuando los cambios de esquema no sean retrocompatibles.
-4. Ejecuta las migraciones explícitamente y luego recrea API y worker juntos con la imagen probada. Comprueba readiness y la tarea y el resultado de demo.
+4. Ejecuta la compuerta de preparación (`initialize`, que ejecuta `python -m itsm.deployment prepare`: la actualización protegida en `prod`, migraciones en los demás modos) o el recurso manual `migrate` del perfil `tools`, y luego recrea API y worker juntos con la imagen probada. Comprueba readiness y la tarea y el resultado de demo.
 5. Conserva la imagen y el lock anteriores. Revertir la imagen no deshace una migración irreversible; recupera el respaldo si la migración no puede revertirse de forma segura. Nunca ejecutes `downgrade` ni restaures sobre datos vivos sin una decisión explícita de recuperación.
 
 Las imágenes usan etiquetas de versión exactas y digests de registro, no `latest`. Las dependencias
@@ -590,6 +607,7 @@ automático, orquestador, pipeline de release ni microservicios de negocio.
 ## Comprobaciones e inspección
 
 ```bash
+# Renders this installation's project: RELEASE_MODE and COMPOSE_FILE are already exported.
 docker compose --env-file /dev/null config --quiet
 docker compose --env-file /dev/null --profile monitoring config --quiet
 # Prometheus config/rules; point the token mount at the same external file the engine uses.

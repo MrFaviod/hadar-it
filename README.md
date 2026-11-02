@@ -95,30 +95,85 @@ Three independent Git repositories live here; root Git ignores the two component
 
 ## Start locally
 
-Persistent SQLite needs no separate database service. Local PostgreSQL and externally
-managed SQL are alternative installation modes; consult the current Phase 11 matrix
-before selecting an engine. Requires Docker Engine + Compose and an operator-reserved
-per-installation `ITSM_SELINUX_LEVEL`, exported before the commands below; see
+One codebase runs in one of three release modes. The mode is part of the Compose project
+name, so `dev`, `prod` and `demo` never share containers, networks or volumes, and every
+application process refuses to start without it. Requires Docker Engine + Compose and an
+operator-reserved per-installation `ITSM_SELINUX_LEVEL`; see
 [shared-volume security](docs/operations.md#reserve-the-shared-volume-selinux-domain).
-No `.env` file is created or read.
+No `.env` file is created or read: variables come from the process environment.
+
+| Mode | Intended use | First owner |
+|---|---|---|
+| `dev` | trying the product on one machine; fictional data, loopback HTTP | `dev.admin`, created by preparation from `ITSM_DEV_ADMIN_PASSWORD` |
+| `prod` | a real installation; empty database, guarded upgrade before migrations, scheduled backups | you create it explicitly with `bootstrap-superadmin` |
+| `demo` | a public fictional demonstration with an hourly in-process reset | public `admin`/`admin`, isolated by design |
+
+Each mode is a Compose overlay on `compose.yaml`: `deploy/compose.dev.yaml`,
+`deploy/compose.prod.yaml`, `deploy/compose.demo.yaml`. Full wiring, per-mode variables,
+the TLS entrypoint and the unproven parts are in
+[release-mode deployment](docs/release-modes-deployment.md).
+
+### Local trial: `dev`
+
+Persistent SQLite needs no separate database service; preparation migrates, claims the
+database for `dev`, creates `dev.admin` and seeds the fictional dataset. Loopback HTTP
+only, with cookies deliberately not `Secure`.
 
 ```bash
-export ITSM_DATABASE_URL=sqlite:////data/app/itsm.db
-docker compose --env-file /dev/null build backend frontend
-docker compose --env-file /dev/null run --rm migrate
-# Supply ITSM_BOOTSTRAP_PASSWORD externally; choose your initial username/name.
-docker compose --env-file /dev/null run --rm -e ITSM_BOOTSTRAP_PASSWORD backend \
-  python -m itsm.identity.cli bootstrap-admin --username YOUR_USERNAME --name 'Your administrator'
-# For this local HTTP URL only (production must use HTTPS and secure cookies):
-export ITSM_AUTH_ORIGIN=http://127.0.0.1:18080 ITSM_AUTH_COOKIE_SECURE=false
-docker compose --env-file /dev/null up -d --wait backend worker frontend
+export RELEASE_MODE=dev
+export ITSM_SELINUX_LEVEL=s0:c500,c501      # reserve your own unused categories
+export ITSM_DEV_ADMIN_PASSWORD='<local dev password>'
+docker compose --env-file /dev/null -f compose.yaml -f deploy/compose.dev.yaml up -d
 ```
 
 - Frontend: `http://127.0.0.1:18080`; implemented domains use authenticated canonical services. Explicitly labeled future/demo integrations are not functional claims.
 - API/OpenAPI: `http://127.0.0.1:18000/docs`.
 - API health: `/api/v1/health/live` and `/api/v1/health/ready`.
 - Worker: separate process, same backend image, shared persistent local queue volume. Default SQLite queue requires no Redis.
+- `initialize` is the preparation gate (`python -m itsm.deployment prepare`). `backend` and `worker` wait for it, and a failed preparation stops the project instead of serving unprepared data. The `migrate` service stays a manual `tools`-profile command, not an installation step.
 - Local PostgreSQL is optional: set `ITSM_DATABASE_URL` for external SQL and omit its profile. For local persistent SQLite main data use `sqlite:////data/app/itsm.db`; queue is a different file/volume.
+
+### Production first installation: `prod`
+
+`prod` requires an explicit database URL and the exact browser origin; cookies stay
+`Secure`, so a real installation needs HTTPS. Set `ITSM_AUTH_ORIGIN=https://…` and, for a
+public host, serve it through the `tls` profile or your own TLS proxy (section 7 of the
+mode document). The production `initialize` image is `itsm-ops:0.1.0`, built from
+`itsm-backend:0.1.0` for the guarded upgrade and its verified backup, so build `backend`
+first.
+
+```bash
+export RELEASE_MODE=prod
+export ITSM_SELINUX_LEVEL=<reserved MCS level>
+export ITSM_DATABASE_URL='postgresql+psycopg://itsm:<password>@<host>:5432/itsm'
+export ITSM_AUTH_ORIGIN=https://itsm.example.com
+docker compose --env-file /dev/null -f compose.yaml -f deploy/compose.prod.yaml build backend frontend
+docker compose --env-file /dev/null -f compose.yaml -f deploy/compose.prod.yaml build initialize
+docker compose --env-file /dev/null -f compose.yaml -f deploy/compose.prod.yaml up -d
+# After `initialize` reports success, create the installation's first Superadmin.
+# Supply ITSM_BOOTSTRAP_PASSWORD externally; choose the account details.
+docker compose --env-file /dev/null -f compose.yaml -f deploy/compose.prod.yaml \
+  run --rm -e ITSM_BOOTSTRAP_PASSWORD backend \
+  python -m itsm.identity.cli bootstrap-superadmin --username YOUR_USERNAME --name 'Your installation owner'
+```
+
+Scheduled backups are the separate `backup` profile (`RELEASE_MODE=prod` is enforced by
+the command itself). Production keeps its data when preparation fails; see
+[upgrade and backup limits](docs/release-modes-deployment.md#6-production-upgrade-and-backups).
+
+### Public demonstration: `demo`
+
+```bash
+export RELEASE_MODE=demo
+export ITSM_SELINUX_LEVEL=<reserved MCS level>
+export ITSM_AUTH_ORIGIN=https://demo.example.com
+docker compose --env-file /dev/null -f compose.yaml -f deploy/compose.demo.yaml --profile tls up -d
+```
+
+The demonstration seeds its own fictional dataset plus the public `admin`/`admin` visitor,
+blanks inherited provider/executor/search credentials and resets itself every 60 minutes
+in-process. Publish it only through TLS with `ITSM_AUTH_ORIGIN` set to that exact public
+origin; see [demo public surfaces](backend/docs/demo-public.md).
 
 Profiles `redis`, `search` and `monitoring` opt into Redis, Meilisearch and Prometheus.
 None is required for basic inventory or SQL search. Monitoring uses the existing
@@ -131,13 +186,34 @@ SQL inventory remains functional. Deterministic agent tests use simulated infere
 not a production demo chatbot. Configuration and MCP connection instructions are in
 [operations](docs/operations.md).
 
+Agent engines run outside the application containers: Pydantic AI is the in-process
+default for ordinary users, while OpenCode and Hermes are operator-installed host
+services reached through a restricted listener; the extension validator is a separate
+fixed broker image. Prerequisites, credentials and trust boundaries:
+[agent integrations](backend/docs/agent-integrations.md),
+[agent tools](backend/docs/agent-tools.md),
+[extension SDK guide](backend/docs/extensions-sdk.md) and
+[fixed validation broker](docs/operations.md#fixed-validation-broker). None of them is
+required for inventory, SQL search or readiness.
+
 ## Verify
 
 ```bash
+# Every mode renders its own project; substitute the overlay you installed.
+RELEASE_MODE=dev ITSM_SELINUX_LEVEL=s0:c500,c501 ITSM_DEV_ADMIN_PASSWORD=test-only \
+  docker compose --env-file /dev/null -f compose.yaml -f deploy/compose.dev.yaml config --quiet
+RELEASE_MODE=prod ITSM_SELINUX_LEVEL=s0:c500,c501 \
+  ITSM_DATABASE_URL=postgresql+psycopg://itsm:test-only@localhost:5432/itsm \
+  ITSM_AUTH_ORIGIN=https://itsm.test.invalid \
+  docker compose --env-file /dev/null -f compose.yaml -f deploy/compose.prod.yaml config --quiet
+RELEASE_MODE=demo ITSM_SELINUX_LEVEL=s0:c500,c501 ITSM_AUTH_ORIGIN=https://demo.test.invalid \
+  docker compose --env-file /dev/null -f compose.yaml -f deploy/compose.demo.yaml config --quiet
+# A bare command must fail: the mode is mandatory.
 docker compose --env-file /dev/null config --quiet
 npm --prefix frontend run check
 # Backend environment and test commands: backend/README.md
 curl --fail http://127.0.0.1:18000/api/v1/health/ready
+python3 tests/prealpha_docs.py   # documented commands and ES/EN command parity
 ```
 
 For development run the API with the exact browser origin and explicit local HTTP cookie override, then `ITSM_DEV_API_URL=http://127.0.0.1:8000 npm --prefix frontend run dev`. Choose an unused API port when needed; never replace an existing host service. A bare Vite production preview has no API proxy: use the Nginx Compose frontend for full login checks.
