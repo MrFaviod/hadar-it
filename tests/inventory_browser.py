@@ -30,7 +30,7 @@ with sync_playwright() as p:
     expect(form).to_be_visible()
     form.locator('input[id$="-name"]').fill(name)
     form.locator('input[id$="-quickCode"]').fill(code)
-    form.locator('input[id$="-site"]').fill('Example Site')
+    form.locator('input[id$="-site"]').fill('Sede Norte')
     form.locator('input[id$="-responsible"]').fill('Operador de prueba')
     page.get_by_role('button', name='Registrar activo', exact=True).click()
     expect(form).not_to_be_visible()
@@ -41,7 +41,7 @@ with sync_playwright() as p:
     asset = records['items'][0]
     asset_id = asset['id']
     assert str(uuid.UUID(asset_id)) == asset_id
-    assert asset['name'] == name and asset['site'] == 'Example Site'
+    assert asset['name'] == name and asset['site'] == 'Sede Norte'
     page.goto(base + '/#/activo/' + asset_id, wait_until='networkidle')
     expect(page.get_by_role('heading', name=name, exact=True)).to_be_visible()
     page.get_by_role('button', name='Editar activo', exact=True).click()
