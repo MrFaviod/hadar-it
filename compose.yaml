@@ -161,7 +161,9 @@ services:
   # no host certificate path is assumed. The listener stays on loopback unless
   # ITSM_TLS_BIND is widened deliberately.
   proxy:
-    image: nginx:1.29-alpine
+    # Pin the same nginx base tag and digest as ./frontend/Dockerfile.
+    # The frontend image adds application files to that base.
+    image: nginx:1.28.3-alpine@sha256:a8b39bd9cf0f83869a2162827a0caf6137ddf759d50a171451b335cecc87d236
     profiles: [tls]
     entrypoint: [nginx, -g, daemon off;]
     ports: ["${ITSM_TLS_BIND:-127.0.0.1}:${ITSM_TLS_PORT:-18443}:8080"]
