@@ -1,6 +1,6 @@
-# Existing frontend design system
+# Hadar IT design system
 
-Captured from existing sources; not a proposed starter. Artboards use system-font fallbacks, never external font files. Production keeps its local fonts.
+Captured from the existing frontend sources; not a proposed starter. Artboards use system-font fallbacks, never external font files. Production keeps its local fonts. The palette and type here belong to **Hadar IT**; "Asset Manager" is only the label the interface inherited.
 
 ## Tokens
 

@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="440" viewBox="0 0 1440 440" role="img" aria-label="Hadar IT, alpha">
+  <rect width="1440" height="440" fill="#071923"/>
+  <g fill="none" stroke="#0f8c80" stroke-width="1.5" opacity="0.7">
+    <path d="M150 250 h150 l70 -110 h170"/>
+    <path d="M1290 250 h-150 l-70 -110 h-170"/>
+  </g>
+  <g fill="#0f8c80">
+    <circle cx="150" cy="250" r="5"/>
+    <circle cx="300" cy="250" r="5"/>
+    <circle cx="370" cy="140" r="5"/>
+    <circle cx="540" cy="140" r="5"/>
+    <circle cx="900" cy="140" r="5"/>
+    <circle cx="1070" cy="140" r="5"/>
+    <circle cx="1140" cy="250" r="5"/>
+    <circle cx="1290" cy="250" r="5"/>
+  </g>
+  <g fill="none" stroke="#d7f0eb" stroke-width="2" stroke-linejoin="round" stroke-linecap="round">
+    <rect x="684" y="196" width="72" height="50" rx="5"/>
+    <path d="M698 196 v-12 a22 22 0 0 1 44 0 v12"/>
+  </g>
+  <circle cx="720" cy="220" r="3.5" fill="#d7f0eb"/>
+  <text x="720" y="318" text-anchor="middle" font-family="DejaVu Sans, sans-serif" font-size="40" letter-spacing="10" fill="#e7f2f2">HADAR IT</text>
+  <text x="720" y="360" text-anchor="middle" font-family="DejaVu Sans, sans-serif" font-size="16" letter-spacing="3" fill="#a7dfd7">Bring your own department.</text>
+  <text x="720" y="398" text-anchor="middle" font-family="DejaVu Sans, sans-serif" font-size="13" letter-spacing="8" fill="#8ba0a6">ALPHA</text>
+</svg>

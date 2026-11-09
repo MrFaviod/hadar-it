@@ -1,19 +1,52 @@
+# Components are independent Git repositories.
 /frontend/
 /backend/
-/.worktrees/
-/.atl/
-/.codegraph/
-*.local
-.env
-.env.*
-__pycache__/
-*.py[cod]
 
-# Local coordination and publication scratch (never ship these artifacts).
+# Local coordination and publication scratch.
 /AGENTS.md
 /SYSTEM.md
 /odd/
 /docs/reviews/
+/.worktrees/
+/.atl/
+/.codegraph/
 /.omp/
 /.publish/
 /.verification/
+/.verification-*.log
+/.tmp-*/
+/.tmp-*.log
+
+# Private local configuration. Do not depend on a user's global excludes.
+.env
+.env.*
+*.local
+*.local.md
+AGENTS.local.md
+**/.claude/settings.local.json
+
+# Python caches, test output and local databases.
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+coverage/
+test-results/
+playwright-report/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite3
+*.sqlite3-journal
+*.sqlite3-wal
+*.sqlite3-shm

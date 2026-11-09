@@ -18,9 +18,9 @@ The product is three different Git repositories, not a monorepo and not submodul
 
 Review each repository where you are going to work before editing and before confirming changes. Component versions evolve separately from `VERSION`.
 
-### Product identity: provisional name
+### Product identity: Hadar IT
 
-The final name is still pending and is not replaced by a unilateral decision. The visible name is configured in **Configuración → Apariencia** (`#/configuracion/apariencia`), field **Nombre visible de la aplicación** (`appName` of the active appearance): the shell and the document title take it from there. Do not rename packages, identifiers, storage paths or the database to change the presentation; the inherited name is provisional, not a branding decision. See [phase10-appearance.md](../backend/docs/phase10-appearance.md).
+**Hadar IT** is the temporary official name, with the tagline "Bring your own department." The name the interface shows is a separate setting, under **Configuración → Apariencia** (`#/configuracion/apariencia`), in the field **Nombre visible de la aplicación** (`appName` of the active appearance): the shell and the document title take it from there. "Asset Manager" is only the label the interface inherited, not the product name. Do not rename packages, identifiers, storage paths or the database to change the presentation. See [phase10-appearance.md](../backend/docs/phase10-appearance.md).
 
 ## Installation
 

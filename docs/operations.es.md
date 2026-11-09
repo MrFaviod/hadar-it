@@ -2,7 +2,7 @@ English: [operations.md](operations.md)
 
 # Operaciones de infraestructura e identidad
 
-Ejecuta los comandos desde `asset/`. El Compose de la raíz referencia los dos checkouts independientes de componentes; clonar solo la raíz no los descarga. Lee backend/README.md para los payloads de API/tareas y los comandos nativos de Python. El renderizador original de React/Vue usa los servicios autenticados canónicos para los módulos implementados. Las integraciones futuras/demo etiquetadas explícitamente no son funciones operativas. Consulta [Validación de la fase 11](phase-11-validation.md) para los flujos ejecutados, la compatibilidad SQL, la evidencia de recuperación y las limitaciones restantes; esta prealfa no está certificada para producción.
+Ejecuta los comandos desde `asset/`. El Compose de la raíz referencia los dos checkouts independientes de componentes; clonar solo la raíz no los descarga. Lee backend/README.md para los payloads de API/tareas y los comandos nativos de Python. El host de React sirve las vistas de dominio de Vue 3 desde recursos locales y usa los servicios autenticados canónicos para los módulos implementados. Las integraciones futuras etiquetadas explícitamente no son funciones operativas. Consulta [Validación de la fase 11](phase-11-validation.md) para los flujos ejecutados, la compatibilidad SQL, la evidencia de recuperación y las limitaciones restantes. El producto es **Hadar IT**, una alfa: esto no es una certificación de producción.
 
 ## Configuración sin archivos de secretos
 

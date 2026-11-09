@@ -2,7 +2,7 @@ Español: [operations.es.md](operations.es.md)
 
 # Infrastructure and identity operations
 
-Run commands from `asset/`. Root Compose references the two independent component checkouts; cloning root alone does not fetch them. Read backend/README.md for API/task payloads and native Python commands. The original React/Vue renderer uses canonical authenticated services for implemented modules. Explicitly labeled future/demo integrations are not operational features. See [Phase 11 validation](phase-11-validation.md) for executed flows, SQL compatibility, recovery evidence and remaining limitations; this pre-alpha is not production-certified.
+Run commands from `asset/`. Root Compose references the two independent component checkouts; cloning root alone does not fetch them. Read backend/README.md for API/task payloads and native Python commands. The React host serves Vue 3 domain views from local assets and uses canonical authenticated services for implemented modules. Explicitly labeled future integrations are not operational features. See [Phase 11 validation](phase-11-validation.md) for executed flows, SQL compatibility, recovery evidence and remaining limitations. The product is **Hadar IT**, an alpha: this is not production certification.
 
 ## Configuration without secret files
 
