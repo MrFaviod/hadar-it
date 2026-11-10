@@ -6,7 +6,7 @@ Ejecuta los comandos desde la raíz que contiene `compose.yaml`, `backend/` y `f
 
 ## Configuración sin archivos de secretos
 
-La persona responsable eligió documentar las variables en lugar de crear `.env` / `.env.example`. Los comandos deshabilitan explícitamente la carga implícita de `.env` de Compose. Suministra las variables desde el entorno que invoca o desde tu mecanismo aprobado de gestión externa de secretos; no pongas credenciales de producción en Git, en transcripciones de terminal ni en archivos de ejemplo. Codifica con URL las credenciales de las URLs de base de datos. El entorno de los contenedores es visible para los administradores de Docker: esto no es una bóveda de secretos.
+Las variables se documentan y se ofrece `.env.example` sin secretos para uso local opcional de Compose con `--env-file .env`; los comandos de abajo mantienen `--env-file /dev/null` para usar solo el entorno. Los comandos deshabilitan explícitamente la carga implícita de `.env` de Compose. Suministra las variables desde el entorno que invoca o desde tu mecanismo aprobado de gestión externa de secretos; no pongas credenciales de producción en Git, en transcripciones de terminal ni en archivos de ejemplo. Codifica con URL las credenciales de las URLs de base de datos. El entorno de los contenedores es visible para los administradores de Docker: esto no es una bóveda de secretos.
 
 Todos los comandos de Compose de este documento se ejecutan en una shell de instalación donde
 el modo de release y su overlay ya están exportados. El modo es obligatorio: nombra el
@@ -170,7 +170,7 @@ docker compose --env-file /dev/null run --rm backend \
 
 Este comando es exclusivo de la instalación y no es una API web; rechaza una instalación que
 ya tiene un propietario activo. Conserva al último propietario activo. Consulta
-`backend/docs/identity.md` para la administración de cuentas y de máquinas delegadas.
+`docs/backend/identity.md` para la administración de cuentas y de máquinas delegadas.
 
 El ejecutor opcional corre **fuera de los contenedores de la aplicación**, bajo una cuenta de
 mínimo privilegio elegida por el operador. Acepta únicamente acciones fijas autenticadas:
@@ -189,7 +189,7 @@ y restringe el acceso de red. Sin un ejecutor configurado y alcanzable, las oper
 informan como **no disponibles**, nunca como respaldo o actualización exitosos.
 
 El ejecutor ejecutable y el contrato exacto de acciones y resultados están documentados en
-`backend/docs/system-operations.md`. Los scripts de producción, las herramientas y credenciales
+`docs/backend/system-operations.md`. Los scripts de producción, las herramientas y credenciales
 de respaldo de base de datos admitidas, la consistencia coordinada entre SQL y adjuntos, la
 retención y el destino, la preparación de una release fijada y confiable y el ensayo de
 recuperación son integraciones propias de cada instalación. Preparar una actualización no es
@@ -500,21 +500,18 @@ de forma explícita.
 Instala skills e inspecciona perfiles usando el instalador auxiliar en el host bare-metal elegido.
 No montes directorios home del host, perfiles de motor ni el socket de Docker dentro del
 contenedor ITSM. La alcanzabilidad de red no establece la seguridad de un perfil confiable; los
-bloqueos de aceptación de `backend/docs/agent-integrations.md` siguen aplicándose. Para deshacer el
+bloqueos de aceptación de `docs/backend/agent-integrations.md` siguen aplicándose. Para deshacer el
 cambio de alias, quita `extra_hosts` de `x-backend` y recrea solo los servicios afectados durante
 una ventana de mantenimiento autorizada.
 
 Para un perfil Hermes dedicado de desarrollo local, usa el ejecutable fijado del workspace con el
 launcher propiedad del host:
 
-La versión verificada de Hermes es 0.22.5 en el commit upstream
-`bf0203a794a07aac3ff764972ab9087baa4e4f4e`. Su entorno dedicado debe incluir el extra `mcp` del
-lockfile: una instalación básica puede iniciar `serve` y aun así no exponer ninguna herramienta
-del ITSM. La verificación local usó `uv sync --frozen --extra mcp
---no-default-groups --inexact --no-install-project --no-config --no-cache
---no-python-downloads --python .venv/bin/python` desde el checkout de código fuente fijado, tras
-inspeccionar el mismo comando con `--dry-run`. No actualices una instalación global ni reemplaces
-el perfil de un operador de forma implícita.
+El conector apunta a Hermes 0.22.5 en el commit upstream
+`bf0203a794a07aac3ff764972ab9087baa4e4f4e`. Su entorno dedicado necesita el extra `mcp`
+del lockfile: una instalación básica puede iniciar `serve` sin exponer herramientas del ITSM.
+Instala desde el código fijado y revisa los cambios de dependencias antes de aplicarlos.
+No actualices una instalación global ni reemplaces el perfil de un operador de forma implícita.
 
 ```bash
 # Supply ITSM_HERMES_MODEL, HERMES_DASHBOARD_BASIC_AUTH_PASSWORD and an independent
@@ -547,7 +544,7 @@ perfiles ni elegir un binario, puerto o comando.
 Admin y Superadmin pueden seleccionar instancias verificadas de Hermes/OpenCode. Los usuarios
 ordinarios pueden seleccionar solo Pydantic AI, ejecutado en contenedores reales etiquetados por
 usuario a través del broker fijo del host autenticado de forma separada. No hay respaldo en el
-mismo proceso ni socket de Docker en la API. Consulta `backend/docs/ai-runtime-isolation.md` para
+mismo proceso ni socket de Docker en la API. Consulta `docs/backend/ai-runtime-isolation.md` para
 el despliegue del broker y la configuración del sandbox. Cambiar un perfil de chat selecciona otra
 instancia configurada y autorizada, reinicia su sesión nativa y conserva la transcripción y el
 borrador del ITSM; nunca cambia en el lugar el perfil activo de un motor compartido.
@@ -575,7 +572,7 @@ Observa el evento estructurado del worker `maintenance.reminders_prepared` y sus
 `created` y `scanned`. La preparación nunca completa un plan, resuelve un incidente ni envía
 correo o Telegram. La entrega es propiedad del servicio de notificaciones de la fase 8 descrito
 arriba; el barrido de mantenimiento solo prepara filas durables de recordatorio. Consulta
-`backend/docs/maintenance.md`, `backend/docs/interventions.md` y `backend/docs/agent-tools.md`
+`docs/backend/maintenance.md`, `docs/backend/interventions.md` y `docs/backend/agent-tools.md`
 para los contratos de operación y permisos.
 
 ## Actualización y reversión
@@ -668,7 +665,7 @@ ITSM_TEST_API_URL=http://127.0.0.1:18000 python3 tests/infrastructure.py
 ITSM_TEST_API_URL=http://127.0.0.1:18080 python3 tests/inventory.py
 ```
 
-Los comandos de pruebas del backend están en la [guía de desarrollo](https://github.com/MrFaviod/hadar-it-backend/blob/master/docs/development.md);
+Los comandos de pruebas del backend están en la [guía de desarrollo](backend/development.md);
 El envío de tareas de demo es solo para desarrollo, no un servicio público
 de ejecución de tareas sin autenticación. Vincula a loopback y exige un límite de autorización
 adecuado antes de exponer datos o acciones de negocio reales. Sin migración automática de esquema
@@ -705,9 +702,9 @@ servicios externos del host, no nuevos servicios de aplicación de Compose.
 
 El SDK v2 admite paquetes declarativos y extensiones ejecutables. Python ejecutable usa un proceso restringido y las interfaces usan renderizado aislado. Una persona responsable debe revisar el digest exacto, los permisos, el plan de migración y la validación antes de aprobar la instalación. Los agentes pueden enviar candidatos, no aprobarlos.
 
-Los puntos de entrada para desarrolladores son `backend/docs/extensions-sdk.md` (inicio rápido
-humano, generador y validador offline), `backend/docs/extensions-host.md` (contrato del host y del
-ciclo de vida) y `frontend/docs/extensions-sdk.md` (slots y componentes nativos de Vue). Chat y MCP
+Los puntos de entrada para desarrolladores son `docs/backend/extensions-sdk.md` (inicio rápido
+humano, generador y validador offline), `docs/backend/extensions-host.md` (contrato del host y del
+ciclo de vida) y `docs/frontend/extensions-sdk.md` (slots y componentes nativos de Vue). Chat y MCP
 exponen `extension_sdk_index` y referencias acotadas `extension_sdk_reference`; el acceso
 arbitrario a shell, sistema de archivos y SQL no forma parte de estas herramientas.
 

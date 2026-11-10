@@ -1,7 +1,6 @@
 # Release-mode deployment: `dev`, `prod` and `demo`
 
-Compose wiring for the three release modes of one codebase. It implements the
-deployment part of the release-mode task (T6): per-mode Compose projects and
+Compose wiring for the three release modes of one codebase: per-mode Compose projects and
 volumes, a mandatory preparation gate, the production upgrade/backup services,
 a TLS entrypoint, and synthetic demo telemetry.
 
@@ -10,7 +9,7 @@ service was started, and nothing here certifies that a mode runs end to end.
 What was actually checked, and what remains unproven, is listed at the end.
 
 Service commands (`prepare`, `backup-loop`, reset, seed, upgrade) belong to the
-backend; their contracts live in `backend/docs/deployment-preparation.md`,
+backend; their contracts live in `docs/backend/deployment-preparation.md`,
 `release-modes.md`, `dev-mode.md`, `demo-reset.md`, `demo-public.md` and
 `ops-backup-restore.md`.
 
@@ -217,9 +216,8 @@ metric paths return 404. The routes exist only in a persisted demo installation.
 The standalone legacy demo initializer/exporter still requires explicit setup.
 
 No alerting, rules or remote_write are configured. No providers or external
-notification channels are enabled. Local real-Prometheus scrape verification
-uses an already-installed image with `--pull=never`; this is separate from proof
-of the full Compose installation or browser Dashboard.
+notification channels are enabled. Synthetic telemetry is fictional and does not
+measure the host or real devices.
 
 ## 9. What differs between the modes
 
@@ -236,7 +234,7 @@ of the full Compose installation or browser Dashboard.
 | TLS | – | profile `tls` | profile `tls` (required for public exposure) |
 | Telemetry | existing `monitoring*` profiles | existing `monitoring*` profiles | synthetic `monitoring-demo` |
 
-## 11. Operational limits
+## 10. Operational limits
 
 - Alpha software is not a production-readiness guarantee. Rehearse TLS, upgrades and restore on a separate installation.
 - The ops recipe does not back up SQL Server.

@@ -159,25 +159,29 @@ def check_readme_start_path() -> None:
     check("README links technical reference", "(docs/technical-guide.md)" in readme)
     check("README links visual feature tour", "(docs/features.md)" in readme)
     check("entry retains alpha warning", "Alpha" in readme and "production" in readme)
+    template = read(".env.example")
     check("install selects dev and its overlay",
-          "export RELEASE_MODE=dev" in install
-          and "export COMPOSE_FILE=compose.yaml:deploy/compose.dev.yaml" in install)
-    check("install keeps environment explicit",
-          "No `.env` file is created or read" in install)
-    check("install requires an allocated MCS and hidden password input",
-          "read -rp" in install and "ITSM_SELINUX_LEVEL" in install
-          and "read -rsp" in install and "ITSM_DEV_ADMIN_PASSWORD" in install)
+          "RELEASE_MODE=dev" in template
+          and "COMPOSE_FILE=compose.yaml:deploy/compose.dev.yaml" in template)
+    check("install copies template without overwriting private config",
+          "cp -n .env.example .env" in install and "chmod 600 .env" in install)
+    check("install requires allocated MCS and a new local password",
+          "ITSM_SELINUX_LEVEL" in install
+          and "ITSM_DEV_ADMIN_PASSWORD" in install
+          and "12–128" in install)
+    check("template contains no default development password",
+          "ITSM_DEV_ADMIN_PASSWORD=\n" in template)
     check("install clones every private master repository",
           all(f"git clone --branch master --single-branch https://github.com/MrFaviod/{repo}.git" in install
               for repo in ("hadar-it", "hadar-it-backend", "hadar-it-frontend")))
     commands = command_lines(install)
     check("install builds before starting",
-          commands.index("docker compose --env-file /dev/null build backend frontend")
-          < commands.index("docker compose --env-file /dev/null up -d --wait --wait-timeout 180"))
+          commands.index("docker compose --env-file .env build backend frontend")
+          < commands.index("docker compose --env-file .env up -d --wait --wait-timeout 180"))
     for line in compose_lines(install):
         if line == "docker compose version":
             continue  # Plugin discovery precedes selecting an installation.
-        check("install Compose keeps env-file explicit", "--env-file /dev/null" in line, line)
+        check("install Compose keeps env-file explicit", "--env-file .env" in line, line)
         check("install preserves data", "--volumes" not in line and " -v" not in line, line)
     check("install names preparation and production first owner",
           "initialize" in install and "bootstrap-superadmin" in install)
@@ -186,8 +190,8 @@ def check_readme_start_path() -> None:
           and not any("run --rm migrate" in line for line in commands))
     check("install links release-mode reference", "(docs/release-modes-deployment.md" in install)
     check("technical reference links SDK and engine prerequisites",
-          "hadar-it-backend/blob/master/docs/extensions-sdk.md" in technical
-          and "hadar-it-backend/blob/master/docs/agent-integrations.md" in technical)
+          "backend/extensions-sdk.md" in technical
+          and "backend/agent-integrations.md" in technical)
     for mode, overlay in COMPOSE_FILES.items():
         check(f"technical reference describes {mode}", overlay in technical)
 
@@ -255,7 +259,7 @@ def check_user_operations_documents() -> None:
         )
         check(
             f"{relative} links the demo contract",
-            "backend/docs/demo-public.md" in text,
+            "backend/demo-public.md" in text,
             "the publishable demo must link its public contract",
         )
 

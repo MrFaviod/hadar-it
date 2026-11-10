@@ -38,7 +38,7 @@ The root ignores the two component directories. They are independent repositorie
 | Optional services | Prometheus/exporters, Alertmanager and Meilisearch |
 | Deployment | Docker Compose; Nginx serves the frontend and proxies the API |
 
-PostgreSQL is the default application database; the local walkthrough deliberately uses SQLite. The application targets PostgreSQL, SQLite and MariaDB. SQL Server configuration is preparation-only, **not validated compatibility**. See the [database matrix](https://github.com/MrFaviod/hadar-it-backend/blob/master/docs/foundation.md).
+PostgreSQL is the default application database; the local walkthrough deliberately uses SQLite. The application targets PostgreSQL, SQLite and MariaDB. SQL Server configuration is preparation-only, **not validated compatibility**. See the [database matrix](backend/foundation.md).
 
 ## Deployment modes
 
@@ -52,7 +52,7 @@ PostgreSQL is the default application database; the local walkthrough deliberate
 
 Every startup depends on `initialize`, which runs `python -m itsm.deployment prepare` before the API and worker. Do not bypass this gate or use the manual `migrate` service as a replacement installer. In `prod`, create the first owner explicitly with `bootstrap-superadmin` after preparation; it is not a default account.
 
-No `.env` file is created or read by the application. Compose commands use `--env-file /dev/null`. Keep credentials in the process environment or an approved external secret-management system, never in Git or clone URLs. For all variables, TLS, storage labels and upgrade ordering, use [operations](operations.md) and the [mode reference](release-modes-deployment.md).
+The application reads process environment variables, not `.env` directly. The installation guide uses the checked-in `.env.example` to create a private Compose `.env`; the alternative operations commands use exported variables with `--env-file /dev/null`. Never commit the private file or put credentials in clone URLs. For all variables, TLS, storage labels and upgrade ordering, use [operations](operations.md) and the [mode reference](release-modes-deployment.md).
 
 ## What needs configuration
 
@@ -75,10 +75,10 @@ Extensions can add data collections, pages, panels and agent tools. Declarative 
 
 Host/kernel prerequisites and validator availability matter; “sandboxed” is not a guarantee against every hostile package or host configuration.
 
-- [Agent engine prerequisites](https://github.com/MrFaviod/hadar-it-backend/blob/master/docs/agent-integrations.md)
-- [SDK quickstart and tools](https://github.com/MrFaviod/hadar-it-backend/blob/master/docs/extensions-sdk.md)
-- [Host, lifecycle and runtime boundaries](https://github.com/MrFaviod/hadar-it-backend/blob/master/docs/extensions-host.md)
-- [Frontend extension contract](https://github.com/MrFaviod/hadar-it-frontend/blob/master/docs/extensions-sdk.md)
+- [Agent engine prerequisites](backend/agent-integrations.md)
+- [SDK quickstart and tools](backend/extensions-sdk.md)
+- [Host, lifecycle and runtime boundaries](backend/extensions-host.md)
+- [Frontend extension contract](frontend/extensions-sdk.md)
 
 ## Development and verification
 
@@ -98,7 +98,7 @@ Backend development needs its own Python 3.14 environment and pinned requirement
 .venv/bin/python -m ruff format --check itsm tests migrations
 ```
 
-Component setup and test prerequisites: [frontend development](https://github.com/MrFaviod/hadar-it-frontend/blob/master/docs/development.md) and [backend development](https://github.com/MrFaviod/hadar-it-backend/blob/master/docs/development.md). Browser checks need Playwright/Chromium and isolated accounts; live engine checks need disposable services. Never target an existing business database with tests or migrations.
+Component setup and test prerequisites: [frontend development](frontend/development.md) and [backend development](backend/development.md). Browser checks need Playwright/Chromium and isolated accounts; live engine checks need disposable services. Never target an existing business database with tests or migrations.
 
 ## Roadmap
 

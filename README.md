@@ -59,6 +59,6 @@ The following items are not available as completed features:
 
 React and TypeScript frontend; Python and FastAPI backend.
 
-[Architecture and configuration](docs/technical-guide.md) · [Frontend](https://github.com/MrFaviod/hadar-it-frontend) · [Backend](https://github.com/MrFaviod/hadar-it-backend)
+[Documentation index](docs/README.md) · [Architecture and configuration](docs/technical-guide.md) · [Frontend](https://github.com/MrFaviod/hadar-it-frontend) · [Backend](https://github.com/MrFaviod/hadar-it-backend)
 
 [Issues](https://github.com/MrFaviod/hadar-it/issues) · [License](LICENSE)

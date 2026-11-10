@@ -6,7 +6,7 @@ Run commands from the root checkout containing `compose.yaml`, `backend/` and `f
 
 ## Configuration without secret files
 
-Configuration uses documented environment variables, not `.env` / `.env.example` files. Commands explicitly disable Compose's implicit `.env` loading. Supply variables via the calling environment or your approved external secret-management mechanism; do not put production credentials in Git, terminal transcripts or example files. URL-encode credentials in database URLs. Container environment is visible to Docker administrators: this is not a secret vault.
+Configuration uses documented environment variables. A secret-free `.env.example` is provided for optional local Compose use with `--env-file .env`; the shell-only commands below still use `--env-file /dev/null`. Commands explicitly disable Compose's implicit `.env` loading. Supply variables via the calling environment or your approved external secret-management mechanism; do not put production credentials in Git, terminal transcripts or example files. URL-encode credentials in database URLs. Container environment is visible to Docker administrators: this is not a secret vault.
 
 Every Compose command in this document runs in one installation shell where the release
 mode and its overlay are already exported. The mode is mandatory: it names the Compose
@@ -152,7 +152,7 @@ docker compose --env-file /dev/null run --rm backend \
 
 This installation-only command is not a web API; it refuses an installation that
 already has an active owner. Preserve the last active owner. See
-`backend/docs/identity.md` for account and delegated-machine administration.
+`docs/backend/identity.md` for account and delegated-machine administration.
 
 The optional executor runs **outside application containers**, under an operator-
 chosen least-privilege account. It accepts authenticated fixed actions only:
@@ -171,7 +171,7 @@ transport and restrict network access. Without a reachable configured executor,
 operations report **unavailable**, never successful backup or update.
 
 The runnable executor and exact action/result contract are documented in
-`backend/docs/system-operations.md`. Production scripts, supported database backup
+`docs/backend/system-operations.md`. Production scripts, supported database backup
 tools/credentials, coordinated SQL-and-attachment consistency, retention/destination,
 trusted pinned release preparation and recovery rehearsal are installation-specific
 integrations. Update preparation is not update application or service restart.
@@ -480,21 +480,19 @@ are not interchangeable. A remote host needs an explicitly secured routable MCP 
 Install skills and inspect profiles using the auxiliary installer on the selected
 bare-metal host. Do not mount host home directories, engine profiles or the Docker
 socket into the ITSM container. Network reachability does not establish trusted
-profile safety; the acceptance blockers in `backend/docs/agent-integrations.md`
+profile safety; the acceptance blockers in `docs/backend/agent-integrations.md`
 still apply. To undo the alias change, remove `extra_hosts` from `x-backend` and
 recreate only the affected services during an authorized maintenance window.
 
 For a dedicated local development Hermes profile, use the pinned workspace
 executable with the host-owned launcher:
 
-The verified Hermes version is 0.22.5 at upstream commit
-`bf0203a794a07aac3ff764972ab9087baa4e4f4e`. Its dedicated environment must include
-the lockfile's `mcp` extra: a bare installation can start `serve` yet expose no
-ITSM tools. The local verification used `uv sync --frozen --extra mcp
---no-default-groups --inexact --no-install-project --no-config --no-cache
---no-python-downloads --python .venv/bin/python` from the pinned source checkout,
-after inspecting the same command with `--dry-run`. Do not upgrade a global
-installation or replace an operator's profile implicitly.
+The connector targets Hermes 0.22.5 at upstream commit
+`bf0203a794a07aac3ff764972ab9087baa4e4f4e`. Its dedicated environment needs the
+lockfile's `mcp` extra: a bare installation can start `serve` yet expose no ITSM
+tools. Install from the pinned source and inspect dependency changes before
+applying them. Do not upgrade a global installation or replace an operator's
+profile implicitly.
 
 ```bash
 # Supply ITSM_HERMES_MODEL, HERMES_DASHBOARD_BASIC_AUTH_PASSWORD and an independent
@@ -528,7 +526,7 @@ Admin and Superadmin may select verified Hermes/OpenCode instances. Ordinary
 Users may select only Pydantic AI, executed in actual per-user labeled containers
 through the separately authenticated fixed host broker. There is no in-process
 fallback and no Docker socket in the API. See
-`backend/docs/ai-runtime-isolation.md` for broker deployment and sandbox settings.
+`docs/backend/ai-runtime-isolation.md` for broker deployment and sandbox settings.
 Changing a chat profile selects another authorized configured instance, resets
 its native session and preserves the ITSM transcript/draft; it never changes a
 shared engine's active profile in place.
@@ -555,8 +553,8 @@ Observe the structured worker event `maintenance.reminders_prepared` and its `cr
 and `scanned` counters. Preparation never completes a plan, resolves an incident or
 sends email/Telegram. Delivery is owned by the Phase 8 notification service described
 above; the maintenance scan only prepares durable reminder rows.
-See `backend/docs/maintenance.md`, `backend/docs/interventions.md` and
-`backend/docs/agent-tools.md` for operation and permission contracts.
+See `docs/backend/maintenance.md`, `docs/backend/interventions.md` and
+`docs/backend/agent-tools.md` for operation and permission contracts.
 
 ## Upgrade and rollback
 
@@ -646,7 +644,7 @@ ITSM_TEST_API_URL=http://127.0.0.1:18000 python3 tests/infrastructure.py
 ITSM_TEST_API_URL=http://127.0.0.1:18080 python3 tests/inventory.py
 ```
 
-Backend test commands are in the [development guide](https://github.com/MrFaviod/hadar-it-backend/blob/master/docs/development.md); Demo task submission is development-only, not a public unauthenticated task-execution service. Bind loopback and require a proper authorization boundary before exposing real business data/actions. No automatic schema migration on health checks and no sensitive URL/secret values in logs or errors.
+Backend test commands are in the [development guide](backend/development.md); Demo task submission is development-only, not a public unauthenticated task-execution service. Bind loopback and require a proper authorization boundary before exposing real business data/actions. No automatic schema migration on health checks and no sensitive URL/secret values in logs or errors.
 
 To stop only this stack, use its explicit Compose project and `down` **without `--volumes`**. Persistent-volume deletion, changing existing services and production deployment require separate authorization.
 
@@ -662,9 +660,9 @@ Provider model lists are explicitly configured; they are not evidence of model a
 
 SDK v2 supports declarative packages and executable extensions. Executable Python runs in a restricted runner process; extension interfaces use isolated rendering. Installation requires a persisted human owner to review the exact digest, requested permissions, migration plan and validation result. Agents may submit candidates, not approve them.
 
-Developer entry points are `backend/docs/extensions-sdk.md` (human quickstart,
-offline generator and validator), `backend/docs/extensions-host.md` (host and
-lifecycle contract) and `frontend/docs/extensions-sdk.md` (native Vue slots and
+Developer entry points are `docs/backend/extensions-sdk.md` (human quickstart,
+offline generator and validator), `docs/backend/extensions-host.md` (host and
+lifecycle contract) and `docs/frontend/extensions-sdk.md` (native Vue slots and
 components). Chat and MCP expose `extension_sdk_index` and bounded
 `extension_sdk_reference` references; arbitrary shell, filesystem and SQL access
 are not part of these tools.

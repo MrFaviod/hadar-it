@@ -5,6 +5,7 @@
 # Local coordination and publication scratch.
 /AGENTS.md
 /SYSTEM.md
+/IDEA.md
 /odd/
 /docs/reviews/
 /.worktrees/
@@ -20,6 +21,7 @@
 # Private local configuration. Do not depend on a user's global excludes.
 .env
 .env.*
+!/.env.example
 *.local
 *.local.md
 AGENTS.local.md
@@ -50,6 +52,3 @@ playwright-report/
 *.sqlite3-journal
 *.sqlite3-wal
 *.sqlite3-shm
-
-# Public template contains no credentials.
-!/.env.example
