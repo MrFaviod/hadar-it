@@ -91,7 +91,7 @@ On a fresh checkout, build `backend` before a production `up`: the production
 `initialize` image is `itsm-ops:0.1.0`, built `FROM itsm-backend:0.1.0` (section 6).
 Preparation itself is the `initialize` service: `up` starts it in front of `backend`
 and `worker`, and production creates no accounts, so the first owner is a separate
-`bootstrap-superadmin` command documented in the root [README](../README.md#start-locally).
+`bootstrap-superadmin` command documented in the [operations guide](operations.md).
 After the first installation, an operator shell can export
 `COMPOSE_FILE=compose.yaml:deploy/compose.prod.yaml` next to `RELEASE_MODE` and keep
 using plain `docker compose --env-file /dev/null …` commands.

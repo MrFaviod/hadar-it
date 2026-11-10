@@ -118,7 +118,7 @@ def check(name: str, condition: bool, detail: str = "") -> None:
 
 
 def check_entry_documents() -> None:
-    for relative in (README, MODE_DOC, *OPS_PAIR, *USER_PAIR):
+    for relative in (README, "INSTALL.md", "docs/technical-guide.md", "docs/features.md", MODE_DOC, *OPS_PAIR, *USER_PAIR):
         check(f"exists {relative}", (ROOT / relative).is_file(), "missing document")
 
     for mode, overlay in COMPOSE_FILES.items():
@@ -151,71 +151,45 @@ def check_entry_documents() -> None:
 
 
 def check_readme_start_path() -> None:
-    text = read(README)
-    check(
-        "README requires a release mode",
-        "export RELEASE_MODE=dev" in text
-        and all(f"-f {overlay}" in text for overlay in COMPOSE_FILES.values()),
-        "the start path does not export RELEASE_MODE with every mode overlay",
-    )
-    check(
-        "README keeps the environment explicit",
-        "No `.env` file is created or read" in text
-        and "docker compose --env-file /dev/null" in text,
-        "the documented commands must keep --env-file /dev/null and no .env file",
-    )
-    check(
-        "README does not use the obsolete bootstrap command",
-        "bootstrap-admin" not in text,
-        "bootstrap-admin was replaced by bootstrap-superadmin",
-    )
-    check(
-        "README names the production first owner",
-        "bootstrap-superadmin" in text and "initialize" in text,
-        "the production path must document initialize plus bootstrap-superadmin",
-    )
-    check(
-        "README does not install through the migrate service",
-        not any("run --rm migrate" in line for line in command_lines(text)),
-        "preparation applies migrations; migrate is a manual tools-profile fallback",
-    )
-    for comment, line in command_entries(text):
-        if not line.startswith("docker compose"):
-            continue
-        if "must fail" in comment.lower():
-            check(
-                "README documents the mandatory-mode refusal",
-                "config" in line and " -f " not in line,
-                line,
-            )
-            continue
-        check(
-            "README compose command names its overlay",
-            any(f"-f {overlay}" in line for overlay in COMPOSE_FILES.values()),
-            line,
-        )
-        check(
-            "README compose command sets the mode",
-            "RELEASE_MODE=" in line or "export RELEASE_MODE=" in text,
-            line,
-        )
-    check(
-        "README links the mode document",
-        "(docs/release-modes-deployment.md" in text,
-        "the start path must link the release-mode document",
-    )
-    check(
-        "README links SDK and engine prerequisites",
-        "backend/docs/extensions-sdk.md" in text
-        and "backend/docs/agent-integrations.md" in text,
-        "the entry document must link the extension SDK and the agent engines",
-    )
-    for profile in ("dev", "prod", "demo"):
-        check(
-            f"README describes mode {profile}",
-            f"deploy/compose.{profile}.yaml" in text,
-            "each mode overlay must be named",
-        )
+    """The readable entry links to one complete installation, not three READMEs."""
+    readme = read(README)
+    install = read("INSTALL.md")
+    technical = read("docs/technical-guide.md")
+    check("README links central installation", "(INSTALL.md)" in readme)
+    check("README links technical reference", "(docs/technical-guide.md)" in readme)
+    check("README links visual feature tour", "(docs/features.md)" in readme)
+    check("entry retains alpha warning", "Alpha" in readme and "production" in readme)
+    check("install selects dev and its overlay",
+          "export RELEASE_MODE=dev" in install
+          and "export COMPOSE_FILE=compose.yaml:deploy/compose.dev.yaml" in install)
+    check("install keeps environment explicit",
+          "No `.env` file is created or read" in install)
+    check("install requires an allocated MCS and hidden password input",
+          "read -rp" in install and "ITSM_SELINUX_LEVEL" in install
+          and "read -rsp" in install and "ITSM_DEV_ADMIN_PASSWORD" in install)
+    check("install clones every private master repository",
+          all(f"git clone --branch master --single-branch https://github.com/MrFaviod/{repo}.git" in install
+              for repo in ("hadar-it", "hadar-it-backend", "hadar-it-frontend")))
+    commands = command_lines(install)
+    check("install builds before starting",
+          commands.index("docker compose --env-file /dev/null build backend frontend")
+          < commands.index("docker compose --env-file /dev/null up -d --wait --wait-timeout 180"))
+    for line in compose_lines(install):
+        if line == "docker compose version":
+            continue  # Plugin discovery precedes selecting an installation.
+        check("install Compose keeps env-file explicit", "--env-file /dev/null" in line, line)
+        check("install preserves data", "--volumes" not in line and " -v" not in line, line)
+    check("install names preparation and production first owner",
+          "initialize" in install and "bootstrap-superadmin" in install)
+    check("install never uses obsolete bootstrap or migration installation",
+          "bootstrap-admin" not in install
+          and not any("run --rm migrate" in line for line in commands))
+    check("install links release-mode reference", "(docs/release-modes-deployment.md" in install)
+    check("technical reference links SDK and engine prerequisites",
+          "hadar-it-backend/blob/master/docs/extensions-sdk.md" in technical
+          and "hadar-it-backend/blob/master/docs/agent-integrations.md" in technical)
+    for mode, overlay in COMPOSE_FILES.items():
+        check(f"technical reference describes {mode}", overlay in technical)
 
 
 def check_operations_documents() -> None:
@@ -350,7 +324,7 @@ def check_optional_tls_image_pinned() -> None:
 
 def check_referenced_overlays_exist() -> None:
     pattern = re.compile(r"deploy/compose\.[a-z]+\.yaml")
-    for relative in (README, MODE_DOC, *OPS_PAIR, *USER_PAIR):
+    for relative in (README, "INSTALL.md", "docs/technical-guide.md", "docs/features.md", MODE_DOC, *OPS_PAIR, *USER_PAIR):
         for overlay in set(pattern.findall(read(relative))):
             check(
                 f"{relative} references an existing overlay {overlay}",
@@ -366,7 +340,7 @@ def check_root_links_exist() -> None:
     skipped: those are independent repositories that this worktree may not contain.
     """
     pattern = re.compile(r"\]\(([^)\s]+)\)")
-    for relative in (README, MODE_DOC, *OPS_PAIR, *USER_PAIR):
+    for relative in (README, "INSTALL.md", "docs/technical-guide.md", "docs/features.md", MODE_DOC, *OPS_PAIR, *USER_PAIR):
         document = ROOT / relative
         for target in set(pattern.findall(document.read_text(encoding="utf-8"))):
             if target.startswith(("http://", "https://", "mailto:")):

@@ -2,7 +2,7 @@ English: [operations.md](operations.md)
 
 # Operaciones de infraestructura e identidad
 
-Ejecuta los comandos desde `asset/`. El Compose de la raíz referencia los dos checkouts independientes de componentes; clonar solo la raíz no los descarga. Lee backend/README.md para los payloads de API/tareas y los comandos nativos de Python. El host de React sirve las vistas de dominio de Vue 3 desde recursos locales y usa los servicios autenticados canónicos para los módulos implementados. Las integraciones futuras etiquetadas explícitamente no son funciones operativas. Consulta [Validación de la fase 11](phase-11-validation.md) para los flujos ejecutados, la compatibilidad SQL, la evidencia de recuperación y las limitaciones restantes. El producto es **Hadar IT**, una alfa: esto no es una certificación de producción.
+Ejecuta los comandos desde la raíz que contiene `compose.yaml`, `backend/` y `frontend/`. Empieza con la [guía de instalación](../INSTALL.md); usa esta referencia para configuración, almacenamiento, actualizaciones y recuperación.
 
 ## Configuración sin archivos de secretos
 
@@ -668,8 +668,8 @@ ITSM_TEST_API_URL=http://127.0.0.1:18000 python3 tests/infrastructure.py
 ITSM_TEST_API_URL=http://127.0.0.1:18080 python3 tests/inventory.py
 ```
 
-Las pruebas del backend y la evidencia de integración están documentadas en backend/README.md y
-en un registro local no publicado. El envío de tareas de demo es solo para desarrollo, no un servicio público
+Los comandos de pruebas del backend están en la [guía de desarrollo](https://github.com/MrFaviod/hadar-it-backend/blob/master/docs/development.md);
+El envío de tareas de demo es solo para desarrollo, no un servicio público
 de ejecución de tareas sin autenticación. Vincula a loopback y exige un límite de autorización
 adecuado antes de exponer datos o acciones de negocio reales. Sin migración automática de esquema
 en las comprobaciones de salud y sin valores sensibles de URL o secretos en logs ni errores.
@@ -703,12 +703,7 @@ servicios externos del host, no nuevos servicios de aplicación de Compose.
 
 ## SDK de extensiones nativas
 
-La aplicación admite paquetes de extensión **nativos de confianza** y versionados. Los manejadores
-Python se ejecutan dentro del proceso del host y los componentes Vue se ejecutan en la aplicación
-del mismo origen. La validación aislada de desarrollo no es un sandbox para código instalado. Un
-Superadmin humano persistido debe revisar el digest exacto del paquete, los permisos solicitados, el
-plan de migración y el resultado de validación antes de instalar. Los agentes pueden preparar y
-enviar candidatos, pero no pueden aprobarlos.
+El SDK v2 admite paquetes declarativos y extensiones ejecutables. Python ejecutable usa un proceso restringido y las interfaces usan renderizado aislado. Una persona responsable debe revisar el digest exacto, los permisos, el plan de migración y la validación antes de aprobar la instalación. Los agentes pueden enviar candidatos, no aprobarlos.
 
 Los puntos de entrada para desarrolladores son `backend/docs/extensions-sdk.md` (inicio rápido
 humano, generador y validador offline), `backend/docs/extensions-host.md` (contrato del host y del

@@ -76,11 +76,11 @@ A complete backup combines pieces that are not recovered from each other:
 
 Engine warnings: do not infer compatibility from the SQLAlchemy URL. SQL Server was not installed or restored in this environment; do not present it as verified.
 
-To rehearse a recovery: choose a maintenance window, coordinate writes and uploads during the cut, restore into a **new and isolated destination** (another Compose project and new volumes), apply explicit migrations and verify readiness, sign-in and authenticated downloads. Never overwrite the live installation or delete volumes to free space. Phase 11 rehearsed native PostgreSQL and MariaDB on disposable databases ([phase-11-validation.md](phase-11-validation.md)); this guide did not execute any restoration. See [operations.md](operations.md#backups-and-recovery).
+To rehearse a recovery: choose a maintenance window, coordinate writes and uploads during the cut, restore into a **new and isolated destination** (another Compose project and new volumes), apply explicit migrations and verify readiness, sign-in and authenticated downloads. Never overwrite the live installation or delete volumes to free space. See [operations.md](operations.md#backups-and-recovery).
 
 ## External modules
 
-An approved module is **trusted native code**, not a sandbox against hostile code: its Python runs in the application process and its Vue on the same origin. Development validation happens in a fixed offline container; afterwards, a person with the Superadmin role reviews the exact version and digest, warnings, new permissions, migration plan and rollback compatibility, and explicitly approves. Editing the code requires a new digest, new validation and new approval. Disabling a module blocks its operations, withdraws its contributions and stops the schedule **without deleting data**. Backend authorization remains in force for every operation of the module.
+SDK v2 separates declarative modules from executable packages. Executable code uses a restricted runner and isolated frontend rendering. A human owner must approve the exact package digest, requested permissions, migration plan and validation result. Changed code needs new validation and approval. Disabling a module does not delete its data.
 
 SDK interface composition allows adding, hiding or replacing navigation, pages, widgets, panels and business actions through declared contributions. It is integrated in this development branch and requires a validated, approved and enabled extension; it does not imply a deployment or a publication. Login, permissions, extension recovery and system operations remain core surfaces. See [extensions-sdk.md](../backend/docs/extensions-sdk.md) and [frontend/docs/extensions-sdk.md](../frontend/docs/extensions-sdk.md).
 

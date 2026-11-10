@@ -2,11 +2,11 @@ Español: [operations.es.md](operations.es.md)
 
 # Infrastructure and identity operations
 
-Run commands from `asset/`. Root Compose references the two independent component checkouts; cloning root alone does not fetch them. Read backend/README.md for API/task payloads and native Python commands. The React host serves Vue 3 domain views from local assets and uses canonical authenticated services for implemented modules. Explicitly labeled future integrations are not operational features. See [Phase 11 validation](phase-11-validation.md) for executed flows, SQL compatibility, recovery evidence and remaining limitations. The product is **Hadar IT**, an alpha: this is not production certification.
+Run commands from the root checkout containing `compose.yaml`, `backend/` and `frontend/`. Start with the [installation guide](../INSTALL.md); use this reference for configuration, storage, upgrades and recovery.
 
 ## Configuration without secret files
 
-The human selected documentation of variables instead of creating `.env` / `.env.example`. Commands explicitly disable Compose's implicit `.env` loading. Supply variables via the calling environment or your approved external secret-management mechanism; do not put production credentials in Git, terminal transcripts or example files. URL-encode credentials in database URLs. Container environment is visible to Docker administrators: this is not a secret vault.
+Configuration uses documented environment variables, not `.env` / `.env.example` files. Commands explicitly disable Compose's implicit `.env` loading. Supply variables via the calling environment or your approved external secret-management mechanism; do not put production credentials in Git, terminal transcripts or example files. URL-encode credentials in database URLs. Container environment is visible to Docker administrators: this is not a secret vault.
 
 Every Compose command in this document runs in one installation shell where the release
 mode and its overlay are already exported. The mode is mandatory: it names the Compose
@@ -571,8 +571,8 @@ Images use exact version tags and registry digests, not `latest`. Dependencies a
 ## Backups and recovery
 
 - PostgreSQL: run `pg_dump -Fc` using your approved credentials to a protected destination. Check `pg_restore --list`, then rehearse restoration to a fresh database and run migrations/readiness. External database backups belong to the external operator; local Docker volumes are not backups.
-- MariaDB: use `mariadb-dump --single-transaction` for transactional tables with approved external credentials, then import into a fresh database using `mariadb`. Coordinate schema changes and file uploads with the SQL snapshot. Run migrations/readiness and authenticated checks after restore. Phase 11 rehearsed native PostgreSQL and MariaDB restoration into separate disposable databases.
-- SQL Server: use the database operator's native full backup/restore procedure, including encryption keys/certificates where configured. This environment did not execute SQL Server installation or restoration; do not infer compatibility from the SQLAlchemy URL or another engine's results.
+- MariaDB: use `mariadb-dump --single-transaction` for transactional tables with approved external credentials, then import into a fresh database using `mariadb`. Coordinate schema changes and file uploads with the SQL snapshot. Run migrations/readiness and authenticated checks after restore.
+- SQL Server: use the database operator's native full backup/restore procedure, including encryption keys/certificates where configured. SQL Server compatibility is not validated; do not infer it from the SQLAlchemy URL or another engine's results.
 - SQLite main DB: use SQLite's online backup API/`.backup`, not a casual copy of a live WAL database. For a cold file backup, stop the owned API/worker first and include a consistent database/WAL state.
 - Huey SQLite: pause this workspace's API enqueue/worker, back up the entire queue volume consistently; restoring it may replay jobs. Phase 6 jobs use durable per-row receipts in main SQL to avoid replaying successful rows. Do not restore queue state independently of related business data without considering duplicate effects.
 - Attachments: back up `attachment-data` together with a consistent main SQL snapshot. SQL stores metadata and opaque blob keys, not file bytes. Restoring only SQL or only the volume is incomplete. Coordinate uploads/deletions during backup and rehearse authenticated downloads after restoring to isolated state. Do not delete unknown blobs as an improvised cleanup operation; interrupted writes may leave unreferenced objects requiring an explicitly authorized reconciliation.
@@ -646,7 +646,7 @@ ITSM_TEST_API_URL=http://127.0.0.1:18000 python3 tests/infrastructure.py
 ITSM_TEST_API_URL=http://127.0.0.1:18080 python3 tests/inventory.py
 ```
 
-Backend tests and integration evidence are documented in backend/README.md and in an unpublished local record. Demo task submission is development-only, not a public unauthenticated task-execution service. Bind loopback and require a proper authorization boundary before exposing real business data/actions. No automatic schema migration on health checks and no sensitive URL/secret values in logs or errors.
+Backend test commands are in the [development guide](https://github.com/MrFaviod/hadar-it-backend/blob/master/docs/development.md); Demo task submission is development-only, not a public unauthenticated task-execution service. Bind loopback and require a proper authorization boundary before exposing real business data/actions. No automatic schema migration on health checks and no sensitive URL/secret values in logs or errors.
 
 To stop only this stack, use its explicit Compose project and `down` **without `--volumes`**. Persistent-volume deletion, changing existing services and production deployment require separate authorization.
 
@@ -660,12 +660,7 @@ Provider model lists are explicitly configured; they are not evidence of model a
 
 ## Native extension SDK
 
-The application supports versioned **trusted native** extension packages. Python
-handlers execute inside the host process and Vue components execute in the
-same-origin application. Isolated development validation is not installed-code
-sandboxing. A persisted human Superadmin must review the exact package digest,
-requested permissions, migration plan and validation result before installation.
-Agents can prepare and submit candidates, but cannot approve them.
+SDK v2 supports declarative packages and executable extensions. Executable Python runs in a restricted runner process; extension interfaces use isolated rendering. Installation requires a persisted human owner to review the exact digest, requested permissions, migration plan and validation result. Agents may submit candidates, not approve them.
 
 Developer entry points are `backend/docs/extensions-sdk.md` (human quickstart,
 offline generator and validator), `backend/docs/extensions-host.md` (host and
