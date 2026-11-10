@@ -31,36 +31,30 @@ You now have `compose.yaml`, `deploy/`, `backend/` and `frontend/` together. The
 
 ## 2. Configure your local installation
 
-Continue in the **same Bash session**, inside `hadar-it/`. Choose a new local password of **12–128 characters** when prompted. Neither prompt writes the password into shell history.
+Inside `hadar-it/`, copy the [configuration template](.env.example) without overwriting an existing `.env`:
 
 ```bash
-export RELEASE_MODE=dev
-export COMPOSE_PROJECT_NAME=hadar-local
-export COMPOSE_FILE=compose.yaml:deploy/compose.dev.yaml
-export ITSM_AUTH_ORIGIN=http://127.0.0.1:18080
-export ITSM_FRONTEND_PORT=18080
-export ITSM_API_PORT=18000
-
-read -rp 'Installation MCS level (allocated for this stack): ' ITSM_SELINUX_LEVEL
-export ITSM_SELINUX_LEVEL
-read -rsp 'New local administrator password: ' ITSM_DEV_ADMIN_PASSWORD
-printf '\n'
-export ITSM_DEV_ADMIN_PASSWORD
+(umask 077; cp -n .env.example .env)
+chmod 600 .env
 ```
 
-No `.env` file is created or read. The explicit `--env-file /dev/null` below disables Compose's automatic `.env` loading. Configuration comes from this shell; Docker administrators can inspect container environments, so this is not a secret vault. Keep the password in your password manager, not in a repository.
+Open `.env` in your editor. Set `ITSM_SELINUX_LEVEL` to the unused MCS level allocated for this installation, and `ITSM_DEV_ADMIN_PASSWORD` to a new local password of **12–128 characters**. Do not reuse a real password. Use single quotes around values containing `$` or `#`.
 
-Ports **18080** and **18000** must be free. If they are occupied, choose different `ITSM_FRONTEND_PORT` / `ITSM_API_PORT` values and change `ITSM_AUTH_ORIGIN` to match the frontend port before continuing. Use that same address in your browser.
+The template selects development mode, its matching overlay, project `hadar-local` and local ports. Optional integration credentials can stay empty. `.env` is ignored by Git: never commit it or share its contents in logs. Compose reads it explicitly; the application itself reads process environment. Docker administrators can inspect container environments, so this is not a secret vault.
+
+Use a fresh shell if you previously exported configuration: shell exports take precedence over `.env`.
+
+Ports **18080** and **18000** must be free. If needed, change `ITSM_FRONTEND_PORT` / `ITSM_API_PORT` in `.env` and update `ITSM_AUTH_ORIGIN`, `ITSM_REPORT_BASE_URL` and `ITSM_MONITORING_PUBLIC_URL` to match the frontend address. Adjust the browser and health-check URLs below too.
 
 ## 3. Build and start
 
 The first build downloads the pinned container images and application dependencies. Later starts reuse the images.
 
 ```bash
-docker compose --env-file /dev/null config --quiet
-docker compose --env-file /dev/null build backend frontend
-docker compose --env-file /dev/null up -d --wait --wait-timeout 180
-docker compose --env-file /dev/null ps -a
+docker compose --env-file .env config --quiet
+docker compose --env-file .env build backend frontend
+docker compose --env-file .env up -d --wait --wait-timeout 180
+docker compose --env-file .env ps -a
 curl --fail http://127.0.0.1:18000/api/v1/health/ready
 curl --fail --output /dev/null http://127.0.0.1:18080/
 ```
@@ -73,16 +67,16 @@ Inventory, directory, maintenance, dashboard and SQL search do not need an AI pr
 
 ## 4. Stop and start again
 
-In the same configured shell:
+From `hadar-it/`, using the same `.env`:
 
 ```bash
-docker compose --env-file /dev/null down
-docker compose --env-file /dev/null up -d --wait --wait-timeout 180
+docker compose --env-file .env down
+docker compose --env-file .env up -d --wait --wait-timeout 180
 ```
 
 `down` keeps the installation's named volume. **Do not add `--volumes`** unless you intend to erase it. Do not run reset commands against data you want to keep.
 
-After opening a new terminal, enter `hadar-it/` and repeat the exports and prompts from step 2 with the **same project name, ports and MCS level**. Initialization is idempotent; changing the environment password does not change an existing account's password.
+After opening a new terminal, enter `hadar-it/` and reuse the existing `.env`; do not copy the template again or change the project name and MCS allocation. Initialization is idempotent; changing `ITSM_DEV_ADMIN_PASSWORD` does not change an existing account's password.
 
 ## If something stops
 
@@ -90,9 +84,9 @@ After opening a new terminal, enter `hadar-it/` and repeat the exports and promp
 |---|---|
 | Clone returns “Repository not found” | GitHub authentication and access to all three private repositories. |
 | Compose rejects `!override` | Upgrade the Compose plugin; do not remove the storage override. |
-| A required variable is missing | Repeat step 2 in the shell running Compose. |
-| Port is already allocated | Change the two port exports and the browser origin consistently. |
-| Initialization failed | Run `docker compose --env-file /dev/null logs --tail=100 initialize`. Do not bypass the preparation gate. |
+| A required variable is missing | Complete the required values in `.env` and keep `--env-file .env` in the command. |
+| Port is already allocated | Change the ports and matching frontend URLs in `.env` consistently. |
+| Initialization failed | Run `docker compose --env-file .env logs --tail=100 initialize`. Do not bypass the preparation gate. |
 | Login fails on the other hostname | Use `127.0.0.1` consistently. `localhost` is a different origin. |
 | The agent is unavailable | Configure a provider/runtime; local installation does not include inference credentials. |
 

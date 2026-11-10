@@ -50,3 +50,6 @@ playwright-report/
 *.sqlite3-journal
 *.sqlite3-wal
 *.sqlite3-shm
+
+# Public template contains no credentials.
+!/.env.example
