@@ -1,50 +1,64 @@
-![Hadar — a blue-white star and its orbital network](assets/hadar-star.webp)
+![Hadar IT](assets/hadar-star.webp)
 
 # Hadar IT
 
-**Bring your own department.**
+Self-hosted IT asset and operations management: inventory, people, locations,
+maintenance, monitoring and reporting.
 
-A small IT team should not need a dozen spreadsheets to see the whole picture.
-Hadar brings your equipment, people and day-to-day work into one shared workspace.
-Know what you have, who relies on it and what needs attention next.
+**[Installation](INSTALL.md)** · [Feature guide](docs/features.md) · [Technical guide](docs/technical-guide.md)
 
-**[Install Hadar](INSTALL.md)** · **[Explore the features](docs/features.md)** · [Technical guide](docs/technical-guide.md)
+> Alpha software. Not ready for production.
 
-> Alpha software. Try it with demo data; it is not ready for production.
+![Dashboard with fictional demo data](assets/screenshots/dashboard.png)
 
-![Your department at a glance, using fictional demo data](assets/screenshots/dashboard.png)
+## Features
 
-## Less chasing. More context.
+- **Asset inventory:** custom fields, lifecycle, attachments, warranties and asset history.
+- **People and locations:** departments, responsible people, sites and floors.
+- **Relationships:** infrastructure maps, dependency graphs and descriptive redundancy groups.
+- **Maintenance:** preventive plans, interventions and incident records.
+- **Dashboard and search:** operational summaries, filters and saved views; optional Meilisearch.
+- **Monitoring and alerts:** telemetry, alert views and notifications through configured services.
+- **Imports and exports:** structured data import, bulk operations and data exports.
+- **Reports and labels:** report templates, queued document generation, printable labels and QR codes.
+- **Access control:** roles, permissions, audit records and scoped API access.
+- **AI and MCP:** an optional assistant and agent tools using the same domain permissions.
+- **Extensions:** SDK v2 packages with validation and explicit human approval before installation.
+- **Customization:** appearance settings, configurable fields and language packs.
 
-- **Know your equipment.** Flexible asset records, locations, responsible people and relationships.
-- **Keep work moving.** Maintenance plans, interventions, incidents and warranties alongside the asset.
-- **See what needs attention.** A shared dashboard, search, monitoring and notifications.
-- **Take information with you.** Imports, reports, exports, printable labels and QR codes.
-- **Make it yours.** Custom fields, saved views, appearance settings and an extension SDK.
-- **Ask for help.** Connect an AI assistant that works with the same inventory and permissions.
+AI, live monitoring and external notifications require configured services.
+Queued reports and workflows require a running worker. Redundancy groups describe
+relationships; they do not perform failover. See the [technical guide](docs/technical-guide.md)
+for configuration and limits.
 
-Monitoring and AI need their own configuration. Background jobs need a running worker.
-The [technical guide](docs/technical-guide.md) covers the details.
-
-## Meet your inventory
+## Inventory
 
 ![Inventory with fictional assets, sites and responsible people](assets/screenshots/inventory.png)
 
-An asset is more than a row. Open its record to find its history, documents,
-relationships and maintenance in one place. **[Take the screenshot tour →](docs/features.md)**
+The [feature guide](docs/features.md) covers the application with screenshots.
 
-## One guide. The whole application.
+## Installation
 
-The [installation guide](INSTALL.md) clones and starts all three components with Docker.
-No separate Python or Node.js setup, and no need to piece together three READMEs.
-Repository access is required while the project remains private.
+Follow the [installation guide](INSTALL.md) to clone all three repositories and
+start the application with Docker Compose. Repository access is required while
+the project remains private.
 
-## Built around your department
+## Work in progress
 
-Hadar is named after a star: a reference point when there is a lot to keep track of.
-You host it, choose your integrations and decide who can do what.
+The following items are not available as completed features:
 
-React and TypeScript on the frontend; Python and FastAPI on the backend.
+- Dependency reduction and backend optimization.
+- Windows and Linux monitoring nodes.
+- Ticketing with a small endpoint interface.
+- Tactical RMM, AnyDesk and Zammad integrations.
+- Single sign-on (SSO).
+- Agent-authored extensions.
+- Mobile application for notifications, alerts and QR workflows.
+
+## Development
+
+React and TypeScript frontend; Python and FastAPI backend.
+
 [Architecture and configuration](docs/technical-guide.md) · [Frontend](https://github.com/MrFaviod/hadar-it-frontend) · [Backend](https://github.com/MrFaviod/hadar-it-backend)
 
-[Report a problem](https://github.com/MrFaviod/hadar-it/issues) · [License](LICENSE)
+[Issues](https://github.com/MrFaviod/hadar-it/issues) · [License](LICENSE)
