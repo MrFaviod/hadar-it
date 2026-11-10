@@ -62,3 +62,5 @@ React and TypeScript frontend; Python and FastAPI backend.
 [Documentation index](docs/README.md) · [Architecture and configuration](docs/technical-guide.md) · [Frontend](https://github.com/MrFaviod/hadar-it-frontend) · [Backend](https://github.com/MrFaviod/hadar-it-backend)
 
 [Issues](https://github.com/MrFaviod/hadar-it/issues) · [License](LICENSE)
+
+[![Built with Gentle-AI](https://raw.githubusercontent.com/Gentleman-Programming/gentle-ai/main/docs/assets/brand/built-with-gentle-ai.png)](https://github.com/Gentleman-Programming/gentle-ai)
