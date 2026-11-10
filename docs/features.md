@@ -3,8 +3,9 @@
 [Install Hadar](../INSTALL.md) · [Project overview](../README.md) · [Technical guide](technical-guide.md)
 
 Start with the department, then follow a piece of equipment through its day-to-day work.
-These are real application screenshots using fictional demo records. The interface shown
-is in Spanish. Demo monitoring is synthetic; the assistant needs a configured model.
+These are real application screenshots with the interface set to English and fictional
+demo records. Asset and site names retain their demo labels. Monitoring is synthetic;
+the assistant needs a configured model.
 
 ## 1. Start with the whole picture
 
