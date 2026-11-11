@@ -36,13 +36,18 @@ x-backend: &backend
     ITSM_LOG_LEVEL: ${ITSM_LOG_LEVEL:-INFO}
     ITSM_AUTH_ORIGIN: ${ITSM_AUTH_ORIGIN:-http://localhost:18080}
     ITSM_AUTH_COOKIE_SECURE: ${ITSM_AUTH_COOKIE_SECURE:-true}
+    # Honour X-Forwarded-For only behind a proxy that appends it (docs/backend/demo-public.md).
+    ITSM_TRUSTED_PROXY: ${ITSM_TRUSTED_PROXY:-false}
     ITSM_AGENT_MODEL: ${ITSM_AGENT_MODEL:-}
     ITSM_AGENT_MAX_STEPS: ${ITSM_AGENT_MAX_STEPS:-8}
     ITSM_AGENT_MAX_HISTORY_MESSAGES: ${ITSM_AGENT_MAX_HISTORY_MESSAGES:-20}
     ITSM_AGENT_MAX_OUTPUT_TOKENS: ${ITSM_AGENT_MAX_OUTPUT_TOKENS:-1024}
+    ITSM_AGENT_RUN_TIMEOUT_SECONDS: ${ITSM_AGENT_RUN_TIMEOUT_SECONDS:-180}
     ITSM_AGENT_OPENAI_BASE_URL: ${ITSM_AGENT_OPENAI_BASE_URL:-}
     # Required only for encrypted provider credential administration; keep outside SQL backups.
     ITSM_AI_CREDENTIAL_KEY: ${ITSM_AI_CREDENTIAL_KEY:-}
+    # Operator allowlist: JSON map of credential reference -> permitted destination URLs. No secret values.
+    ITSM_AI_SECRET_DESTINATIONS: ${ITSM_AI_SECRET_DESTINATIONS:-{}}
     # Ordinary User inference fails closed without the separate host-side container broker.
     # Do not mount the Docker socket or application SQL volumes into User runtimes.
     ITSM_AI_BROKER_URL: ${ITSM_AI_BROKER_URL:-}

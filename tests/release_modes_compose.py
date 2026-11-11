@@ -42,6 +42,10 @@ def main():
         for name in ("initialize", "backend"):
             assert services[name]["environment"]["RELEASE_MODE"] == mode
         assert services["backend"]["depends_on"]["initialize"]["condition"] == "service_completed_successfully"
+        # Off by default: an edge that does not append X-Forwarded-For must not be trusted.
+        assert services["backend"]["environment"]["ITSM_TRUSTED_PROXY"] == "false"
+        assert services["backend"]["environment"]["ITSM_AGENT_RUN_TIMEOUT_SECONDS"] == "180"
+        assert services["backend"]["environment"]["ITSM_AI_SECRET_DESTINATIONS"] == "{}"
         if mode == "demo":
             assert "worker" not in services
             assert services["backend"]["environment"]["OPENAI_API_KEY"] == ""
