@@ -1,6 +1,6 @@
 # Inventory slice and agent interfaces
 
-Phase 3 delivered the first agent-first inventory slice: one canonical service
+Phase 3 delivered the first inventory slice: one canonical service
 reused by the REST API, the Pydantic AI assistant and the FastMCP server. Phase 4
 extends it with catalog-driven fields, lifecycle/history/media and configured
 quick codes; see `docs/backend/asset-core.md`, `docs/backend/inventory-catalog.md` and
