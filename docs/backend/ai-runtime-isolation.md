@@ -4,7 +4,7 @@ This note is the operator contract for ordinary-User conversational inference.
 It covers the API-to-broker connection, the host broker process, the per-run
 container boundary and the failure modes that must stay fail-closed.
 
-`docs/backend/agent-integrations.md` owns the HTTP chat contract. `docs/backend/external-engines.md`
+[Agent integrations and conversational control](agent-integrations.md) owns the HTTP chat contract. [External agent engines](external-engines.md)
 owns installed Hermes/OpenCode engines, which remain an administrator surface.
 
 ## Trust boundary
@@ -173,7 +173,36 @@ the reservation. Ending a runtime only releases an unused pre-dispatch sentinel;
 it does not refund potentially active calls. Personal provider selection charges
 only the personal policy, even when the company limit is zero.
 
-`ITSM_AGENT_CONTEXT_TOKEN_BOUND`, when supplied, is an operator-declared input
-bound; it is not a verified tokenizer count. Without it admission reserves the
-output cap only and is explicitly admission-only. Neither the SDK's aggregate
-usage limits nor this bridge imply strict token or egress certification.
+`ITSM_AGENT_CONTEXT_TOKEN_BOUND`, when supplied, is an operator declaration,
+not a tokenizer count. Trusted admission serializes run input excluding provider
+credentials and binary image/document bodies, adds existing estimates (2048 per
+image, 4096 per document), accumulated trusted tool-result bytes and prior output
+caps, then the next output cap. Text attachments, history and schemas retain
+their floor; worker-declared values cannot lower it. Attachment byte/count/frame
+limits still apply. Flat modality estimates cannot bound every provider, image
+resolution or document page count: this is admission accounting, not a strict
+token/billing upper bound.
+
+The API enforces `ITSM_AGENT_MAX_STEPS * 4` trusted tool calls and one absolute
+monotonic `ITSM_AGENT_RUN_TIMEOUT_SECONDS` deadline. Repeated ready/usage frames
+do not restart the deadline. Socket cleanup occurs on success and rejection.
+A synchronous in-process trusted tool cannot safely be forcibly interrupted:
+if it overruns, the API rejects continuation when it returns. This is not a hard
+wall-clock cancellation guarantee for blocking tools; no new supervisor/thread
+killer is introduced.
+
+### Multimodal admission estimate boundary
+
+Binary image/PDF accounting uses the existing 2048/4096 estimate, raised to the
+UTF-8 byte size of readable runs of at least 64 characters in the decoded body.
+Control/invalid bytes separate runs; they do not erase a long neighboring text
+run. Thus merely labelling a long plain-text body as PNG/PDF does not obtain the
+flat estimate. The accounting copy does not alter the forwarded bytes.
+
+This heuristic is not file validation or a universal token/billing upper bound.
+Compressed/encoded text, text split into short runs and genuine multimodal token
+costs are provider-dependent and can exceed the reservation. Ordinary text,
+history, schemas and tool results retain their full serialized byte floor. The
+configured context declaration, existing attachment byte limits and output cap
+remain independent controls; measured usage settles through the existing ledger,
+and unavailable usage keeps its unresolved hold. No tokenizer is installed.

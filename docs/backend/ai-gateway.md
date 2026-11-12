@@ -125,10 +125,16 @@ be widened by the caller.
 - `stream_options` accepts only `include_usage`; streaming always forces
   `include_usage: true`.
 
-The reserved amount is `context_tokens + output_cap`; the lease's
-`context_tokens` is an operator-declared upper bound, not a measurement of the
-actual prompt. Missing bounds fail lease issuance, so no paid call can start
-without an admission bound.
+The reserved amount is `max(context_tokens, non_binary_request_utf8_bytes +
+attachment_estimates) + output_cap`. Only validated inline image/PDF bodies are
+replaced for accounting (2048 per image, 4096 per PDF); the forwarded request
+remains unchanged. Text files count their decoded UTF-8 bytes, while prompt,
+history, schemas and other fields retain their serialized byte floor. A small
+lease declaration cannot hide that text. Existing encoded-byte limits still
+apply independently. The flat modality values reuse the attachment admission
+estimates, not universal provider token/billing bounds; actual cost depends on
+provider, resolution and pages, and may exceed the reservation. Missing bounds
+fail lease issuance.
 
 ## Accounting and failures
 
@@ -213,3 +219,19 @@ configuration and is the amount reserved. Strict whole-engine enforcement
 requires the parent runtime's disposable-process network isolation and egress
 evidence. `/responses`, embeddings, audio, images and file uploads are not
 supported and return explicit errors rather than being proxied.
+
+### Multimodal admission estimate boundary
+
+Binary image/PDF accounting uses the existing 2048/4096 estimate, raised to the
+UTF-8 byte size of readable runs of at least 64 characters in the decoded body.
+Control/invalid bytes separate runs; they do not erase a long neighboring text
+run. Thus merely labelling a long plain-text body as PNG/PDF does not obtain the
+flat estimate. The accounting copy does not alter the forwarded bytes.
+
+This heuristic is not file validation or a universal token/billing upper bound.
+Compressed/encoded text, text split into short runs and genuine multimodal token
+costs are provider-dependent and can exceed the reservation. Ordinary text,
+history, schemas and tool results retain their full serialized byte floor. The
+configured context declaration, existing attachment byte limits and output cap
+remain independent controls; measured usage settles through the existing ledger,
+and unavailable usage keeps its unresolved hold. No tokenizer is installed.

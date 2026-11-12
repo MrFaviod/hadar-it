@@ -1,4 +1,9 @@
-# Extensions sdk
+# Extension SDK
+
+The SDK v2 package contract: runtimes, manifest, collections, operations, events,
+migrations and agent tools that an extension can declare, and how the host
+validates them. Lifecycle and isolation are in [Native extension host](extensions-host.md);
+the browser side is in [Extensions: interface and review](../frontend/extensions-sdk.md).
 
 ## Native integration contract
 
@@ -83,6 +88,23 @@ schema requires `restoreData: true` plus `confirm: "<id>"`. Disable and uninstal
 never delete the data directory; `POST /api/v1/extensions/{id}/uninstall`
 removes versions, candidates, migration rows, registered permissions and the
 Superadmin grants for those codes while keeping the data.
+
+### Bounded value schemas
+
+Operation parameters enforce their declared top-level types. An optional array
+`items` declaration accepts only `{ "type": <supported parameter type> }` and
+checks every element; it cannot declare nested properties, patterns, composition
+or recursive schemas. Arrays without `items` retain their existing untyped
+contents; an `object` item checks object shape only, not its keys.
+
+Declared collection schemas enforce the scalar subset: `type`, typed `enum`,
+string `format` (`date`, `date-time`, `uuid`) and `maxLength` (integer 1–4000),
+finite numeric `minimum`/`maximum`, `required` and closed properties. Invalid
+bounds or unsupported keywords fail admission rather than being silently ignored.
+An explicitly empty property map admits only an empty record; omitting the
+collection schema preserves legacy arbitrary records. Existing supported packages
+need no migration; packages relying on previously ignored/malformed declarations
+must correct them before readmission. This is not general JSON Schema support.
 
 ### Events, references and reconcile
 

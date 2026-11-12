@@ -268,3 +268,26 @@ in the code.
   guess and duplicate an inherited descriptor. A forged frame is then refused
   instead of trusted, but the module can consume a host reply or abort its own
   invocation. It cannot gain data or authority that way.
+
+
+## Remote validator transport trust
+
+`ITSM_EXTENSION_VALIDATOR_URL` accepts HTTPS, or authenticated HTTP only to a
+literal loopback address (`127.0.0.1` / `::1`, not `localhost` or private LAN).
+Configure it with the existing paired `ITSM_EXTENSION_VALIDATOR_TOKEN`; the client
+uses the fixed `/validate` path, certificate verification for HTTPS, bounded
+package/report sizes, no redirects or ambient proxies. No new PKI is required.
+For loopback HTTP, bind the broker only to loopback and keep the shared token
+private; remote operators must provide an HTTPS endpoint they trust.
+
+The response comes over that authenticated configured transport and must match
+the submitted package digest and report schema. A digest binds package bytes;
+it does **not** authenticate an issuer or prove a malicious broker executed any
+validator. TLS authenticates the configured endpoint, not its honesty. The
+operator-selected validator remains a trusted service.
+
+## Frame sequencing and navigation
+
+The bridge ignores requests, resize and navigation until its existing `itsm:ready` handshake. Declared operations still go through the existing SDK/permission checks. Own declared page IDs and their exact hash links are allowed; host core destinations are admitted by the existing route parser/canonical serializer, including map/graph aliases. Unknown routes, trailing undeclared segments and undeclared/sibling extension pages are rejected without changing location. This is destination validation, not another authorization router.
+
+Source/guest checks, minimal asset-ID initialization, wildcard `postMessage` delivery to the opaque origin and terminal second-load behavior remain. The opaque-origin race residual A36 is not claimed eliminated: `"null"` targetOrigin and an unauthenticated new channel are not substitutes.

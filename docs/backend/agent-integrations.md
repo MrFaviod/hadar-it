@@ -87,8 +87,9 @@ The message stream emits `data:`-only JSON frames. `session` starts the turn,
 `delta` carries a new text fragment (append it, never replace), `tool` reports
 canonical tool activity, `usage` distinguishes precision from provider/engine provenance,
 and exactly one terminal `done` frame reports `cancelled`, and for the built-in
-engine `actions`, `results` and `approvalPending`. An `error` frame is sanitized:
-provider URLs, bearer values and configured secrets are redacted.
+engine `actions`, `results` and `approvalPending`. An engine `error` frame uses closed stable diagnostic codes/messages; arbitrary
+upstream error bodies are not returned. Known authentication, protocol, timeout
+and availability categories remain distinguishable.
 
 One running turn per session is enforced before the stream starts. A second
 message or model change during a run returns a conflict; cancellation reaches
@@ -163,10 +164,13 @@ Delivery per engine:
   `instances[].models[].inputs = {"image": bool|null, "file": bool|null}`.
   A `null` mark is unknown and must be treated as unsupported by clients.
 
-Company-funded runs reserve a conservative attachment estimate
+Company-funded runs initially reserve an attachment admission estimate
 (`2048` tokens per image, `4096` per document, `8 + ceil(bytes / 4)` per inlined
 text) on top of the one-token admission sentinel; measured provider usage
-replaces it on settlement. Personal funding stays record-only.
+replaces it on settlement when available; unknown outcomes retain their hold.
+These flat image/document estimates are not universal token upper bounds: cost
+depends on the provider, image resolution and document pages. Existing attachment
+count/byte limits remain enforced. Personal funding stays record-only.
 
 ## Quota policy and managed engines
 
@@ -177,10 +181,13 @@ unlimited; zero denies admission. Human `system.providers` authority controls
 installation defaults, per-user overrides, reports and audited resolution.
 See [ai-usage.md](ai-usage.md) for policy, day boundaries and reconciliation.
 
-Before each built-in provider request, SQL atomically reserves the configured
-input-context bound plus enforced output maximum. Without a declared context
-bound, enforcement is explicitly admission-only; the output cap is not a claim
-that arbitrary input is bounded. Model retries and tool loops obtain separate
+Before each built-in provider request, SQL atomically reserves the greater of
+the configured input-context declaration and serialized non-binary UTF-8 input
+(history, tool schemas and textual content) plus the existing image/document
+estimates, then adds the enforced output maximum. Only typed binary content is
+excluded from serialization accounting; inlined text is not. This admission
+estimate is neither a provider tokenizer nor a billing guarantee, and provider
+usage may exceed it. Model retries and tool loops obtain separate
 reservations. SDK cache and reasoning counters remain subsets, not additional
 tokens. Ordinary users retain the isolated worker; quota messages cross its
 validated broker protocol without granting database or actor authority.
@@ -232,7 +239,7 @@ returned.
   visible only to their owner and cannot be modified or deleted by another
   person. Calls funded by a personal provider are record-only for the quota
   ledger: they are attributed and reported but never denied by a daily token
-  limit (see `docs/backend/ai-usage.md`).
+  limit (see [AI usage quotas](ai-usage.md)).
 - A personal `baseUrl` must be public HTTPS. The guarded transport resolves and
   pins a public address on every connect, keeps TLS hostname verification on
   the original host, and disables redirects and environment proxies. A global
@@ -642,3 +649,47 @@ environment or in engine profile files.
 ## Effective runtime permission attestation
 
 Independent OpenCode inspection evaluates agent rules followed by saved grants using last-match-wins semantics. Later denies of the required ITSM tools or selected skills prevent verification. Saved asks, malformed entries and broad allows also prevent verification; safe unrelated denies and narrow selected grants remain valid. This applies to fresh inspection used by receipt import without trusting a receipt alone.
+
+
+## Operator-owned credential destinations
+
+`ITSM_AI_SECRET_DESTINATIONS` is a JSON object mapping an environment-variable
+**name** to a list of exact engine/MCP destination URLs. It contains no secrets:
+
+```text
+{"ENGINE_PASSWORD":["http://127.0.0.1:14963"],"MCP_TOKEN":["http://127.0.0.1:18080/api/v1/mcp"]}
+```
+
+The default empty mapping denies environment-reference use. Configure dedicated
+references before creating/updating an instance or verifying an MCP installation;
+existing references are rechecked before runtime use. URL shape follows the
+existing provider validator, with trailing slash normalization, no userinfo,
+query or fragment. Private/local engines remain intentional explicit targets.
+The mapping trusts operator-controlled DNS and the configured service; it is not
+a DNS pin or a sandbox for a malicious engine. Engine/MCP HTTP clients ignore
+ambient proxies and do not follow redirects. External engine-produced artifacts
+remain within the documented trusted-native-engine boundary.
+
+Provider records already bind their own sealed key and URL; changing a provider
+URL now requires explicitly supplying its destination credential (`apiKey`) in
+the same update, rather than silently forwarding the retained key. Global
+provider creation is the existing full-human-administrator trust decision;
+personal providers retain connect-time DNS/address policy. Neither is a blanket
+ban on private destinations. Built-in system providers use the same no-proxy,
+no-redirect client rather than an SDK ambient transport.
+
+### Multimodal admission estimate boundary
+
+Binary image/PDF accounting uses the existing 2048/4096 estimate, raised to the
+UTF-8 byte size of readable runs of at least 64 characters in the decoded body.
+Control/invalid bytes separate runs; they do not erase a long neighboring text
+run. Thus merely labelling a long plain-text body as PNG/PDF does not obtain the
+flat estimate. The accounting copy does not alter the forwarded bytes.
+
+This heuristic is not file validation or a universal token/billing upper bound.
+Compressed/encoded text, text split into short runs and genuine multimodal token
+costs are provider-dependent and can exceed the reservation. Ordinary text,
+history, schemas and tool results retain their full serialized byte floor. The
+configured context declaration, existing attachment byte limits and output cap
+remain independent controls; measured usage settles through the existing ledger,
+and unavailable usage keeps its unresolved hold. No tokenizer is installed.
