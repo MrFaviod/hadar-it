@@ -63,6 +63,17 @@ def main():
             assert services["initialize"]["environment"]["ITSM_OPS_STATUS_PATH"] == (
                 "/data/backup-status/status.json"
             )
+        # Every application container: read-only root, /tmp as tmpfs, bounded PIDs.
+        # Writable state stays on the named volumes; no memory limit is asserted
+        # because the default is unlimited (operator knob ITSM_APP_MEM_LIMIT).
+        for name in ("initialize", "backend", "worker", "frontend", "proxy"):
+            if name not in services:
+                continue
+            assert services[name]["read_only"] is True, name
+            assert services[name]["pids_limit"] == 256, name
+            if name in ("initialize", "backend", "worker"):
+                assert "/tmp" in str(services[name]["tmpfs"]), name
+        print(f"PASS {mode}: application containers are read-only with bounded PIDs")
         volumes.append({value["name"] for value in model.get("volumes", {}).values()})
         print(f"PASS {mode}: project, gate, mode and maintenance isolation")
     assert not any(a & b for i, a in enumerate(volumes) for b in volumes[i + 1:])
