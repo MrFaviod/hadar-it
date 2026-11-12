@@ -124,7 +124,7 @@ not inherit a restricted key and must not be created or resumed through one.
 The internal trusted-host principal path remains available for existing host tests
 and orchestration; it is not a client-selectable identity.
 
-`POST /api/v1/tasks/demo` requires `assets.view`. Reading `/api/v1/tasks/{task_id}`
+`POST /api/v1/tasks/demo` requires `system.configure`. Reading `/api/v1/tasks/{task_id}`
 requires that permission plus a durable owner match, or current unscoped human
 administration. Personal keys cannot use the creator's ambient administrator role
 to read someone else's tasks. Unknown or ownerless queue locators return `404`

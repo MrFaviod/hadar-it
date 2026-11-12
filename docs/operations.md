@@ -78,6 +78,12 @@ administrative session and external configuration mechanism, including later
 `run --rm migrate`, bootstrap and update commands. Compose fails with an actionable
 message if it is absent rather than guessing a shared category allocation.
 
+Application containers (`initialize`, `backend`, `worker`, `frontend` and `proxy`) run with a
+read-only root filesystem; `/tmp` is the only tmpfs scratch area. Persistent state stays on the
+named volumes of the mode. Each container has `pids_limit: 256`. No memory cap is applied by
+default; set `ITSM_APP_MEM_LIMIT` (for example `1g`) to add one. Size it from measured peak use,
+including PDF render children: an undersized limit stops the process.
+
 API, worker and one-shot commands share application, queue and opaque-file named
 volumes. Docker's independent private labels made fresh installs appear healthy
 while the worker could not read the queue. The backend anchor therefore gives

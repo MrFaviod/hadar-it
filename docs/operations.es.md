@@ -79,6 +79,13 @@ administrativa y mecanismo externo de configuración, incluidos los posteriores 
 `run --rm migrate`, bootstrap y actualización. Compose falla con un mensaje accionable si
 falta, en lugar de adivinar una asignación de categorías compartida.
 
+Los contenedores de aplicación (`initialize`, `backend`, `worker`, `frontend` y `proxy`) corren
+con el sistema de archivos raíz de solo lectura; `/tmp` es el único espacio temporal tmpfs.
+El estado persistente queda en los volúmenes nombrados del modo. Cada contenedor tiene
+`pids_limit: 256`. Por defecto no hay límite de memoria; define `ITSM_APP_MEM_LIMIT` (por
+ejemplo `1g`) para añadirlo. Dimensiónalo con el pico medido, incluidos los procesos hijos de
+render de PDF: un límite demasiado pequeño detiene el proceso.
+
 API, worker y comandos de una sola ejecución comparten los volúmenes nombrados de
 aplicación, cola y archivos opacos. Las etiquetas privadas independientes de Docker hacían
 que las instalaciones nuevas parecieran sanas mientras el worker no podía leer la cola. Por
