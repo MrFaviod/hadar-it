@@ -1,23 +1,23 @@
-# Ayuda integrada
+# In-app help
 
-Abre **Ayuda** en la navegación o visita `#/ayuda`. La búsqueda ignora mayúsculas y tildes; no consulta datos privados ni proveedores externos. La página documenta inventario, operaciones, incidentes y mantenimiento, Panel y supervisión, garantías, reportes, configuración, agentes y extensiones. Los enlaces de acción aparecen según los permisos de la cuenta; la autorización definitiva sigue en el servidor.
+Open **Help** in the navigation or visit `#/ayuda`. Search ignores case and accents and does not query private data or external providers. The page covers inventory, operations, incidents and maintenance, the dashboard and monitoring, warranties, reports, settings, agents and extensions. Action links appear according to the account's permissions; final authorization stays on the server.
 
-## Identidad del producto
+## Product identity
 
-**Hadar IT** es el nombre oficial temporal, con la bajada "Bring your own department." El nombre que muestra la interfaz se configura aparte, en **Configuración → Apariencia** (`#/configuracion/apariencia`), en el campo **Nombre visible de la aplicación** (`appName` en la apariencia activa). General muestra el nombre actual y enlaza al editor. El shell y el título del documento usan ese valor; no cambies nombres de paquetes ni identificadores de almacenamiento para personalizar la presentación. "Asset Manager" es la etiqueta heredada, no el nombre del producto.
+**Hadar IT** is the current product name, with the tagline "Bring your own department." The name shown in the interface is configured separately in **Settings → Appearance** (`#/configuracion/apariencia`), in the **Visible application name** field (`appName` in the active appearance). **General** shows the current name and links to the editor. The shell and the document title use that value; do not rename packages or storage identifiers to customize the presentation. "Asset Manager" is the legacy label, not the product name.
 
-## Modo demostración
+## Demo mode
 
-Cuando el servidor marca la sesión como demostración, el shell de la aplicación muestra la franja **Modo demostración** bajo la barra superior, en escritorio y en móvil. La marca viene de la respuesta de sesión del servidor, no de una preferencia del navegador: desaparece al cerrar sesión, al vencer la sesión y al iniciar una sesión nueva. Sirve para distinguir la instalación de demostración de una instalación real; no describe por sí sola el efecto de una operación concreta.
+When the server marks the session as a demo, the application shell shows the **Demo mode** strip under the top bar, on desktop and mobile. The flag comes from the server's session response, not from a browser preference: it disappears on sign-out, when the session expires and when a new session starts. It distinguishes the demo installation from a real one; on its own it does not describe the effect of any particular operation.
 
-Junto a la franja, la cuenta regresiva **Reinicio en m:ss** usa la hora y el próximo reinicio que informa `GET /api/v1/demo/status`; el navegador la consulta cada 15 segundos y avanza los segundos entre consultas. Si esa consulta falla, muestra **Próximo reinicio no disponible** en lugar de inventar una hora. Cuando el servidor reinicia la demo, las sesiones dejan de ser válidas y la aplicación vuelve a la pantalla de acceso; también puedes cerrar sesión desde el menú de cuenta.
+Next to the strip, the **Restart in m:ss** countdown uses the time and next restart reported by `GET /api/v1/demo/status`; the browser polls it every 15 seconds and advances the seconds in between. If that request fails, it shows **Next restart unavailable** instead of inventing a time. When the server resets the demo, sessions stop being valid and the application returns to the sign-in screen; you can also sign out from the account menu.
 
-## Alcance
+## Scope
 
-La ayuda explica las funciones disponibles, no promete un sistema autónomo ni certificación de producción. La instalación, respaldos y administración avanzada requieren la documentación operativa del despliegue. Mantén estas guías junto a los cambios de comportamiento: una explicación no sustituye un control de permisos ni una confirmación de una operación irreversible.
+Help explains the available functions; it does not promise an autonomous system or production certification. Installation, backups and advanced administration need the deployment's operations documentation. Keep these guides alongside behavior changes: an explanation does not replace a permission check or the confirmation of an irreversible operation.
 
-## Extensiones instaladas
+## Installed extensions
 
-Las extensiones añaden páginas, paneles en el detalle del activo, widgets del panel y acciones sobre un activo. Una extensión **declarativa** solo aporta datos: el host dibuja sus tablas y formularios y no ejecuta código en la página. Una extensión con **código aislado** muestra su interfaz dentro de un marco separado que no accede a tu sesión, al resto de la página ni al almacenamiento del navegador; recibe solo el identificador del activo y pide los datos que muestra mediante sus operaciones declaradas, que el servidor autoriza con tus permisos. Si el marco se navega a otro documento, la aplicación deja de responderle.
+Extensions add pages, panels on the asset detail, dashboard widgets and actions on an asset. A **declarative** extension contributes data only: the host draws its tables and forms and runs no code on the page. An extension with **isolated code** shows its interface inside a separate frame that cannot access your session, the rest of the page or browser storage; it receives only the asset identifier and requests the data it shows through its declared operations, which the server authorizes with your permissions. If the frame navigates to another document, the application stops answering it.
 
-Si un módulo aparece como **Requiere actualización**, usa una versión anterior del SDK: sus datos siguen guardados, pero sus páginas no se muestran hasta actualizarlo. La revisión, instalación, desinstalación y rollback son tareas de Superadmin en **Configuración → Extensiones**; desinstalar conserva la base de datos propia del módulo.
+If a module shows **Requires an update**, it uses an older SDK version: its data stays stored, but its pages are not shown until it is updated. Review, installation, uninstallation and rollback are Superadmin tasks in **Settings → Extensions**; uninstalling keeps the module's own database.

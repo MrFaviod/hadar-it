@@ -173,7 +173,7 @@ inventing a position or a summary for it.
 
 The REST history route, the agent tool and the MCP tool now serialize
 `structured_payload()` per item, keeping `assetId`, `total`, `limit`, `offset`
-and every old history key. Actions recorded by this slice: `assigned`,
+and every old history key. Actions recorded here: `assigned`,
 `returned`, `transferred`, `relationship_created`, `relationship_updated`,
 `relationship_removed`, `host_moved`, plus the pre-existing `created`,
 `updated`, `archived`, `restored`, `retired`, `purged`, `cloned`. Each row keeps
@@ -239,7 +239,7 @@ The reference columns intentionally carry no database foreign key: adding a
 constraint to an existing table is not portable, so referential integrity is
 owned by `InventoryService` with `DirectoryService`.
 
-`0010_redundancy` adds the tables described in `docs/backend/redundancy.md`; it does not
+`0010_redundancy` adds the tables described in [Redundancy groups](redundancy.md); it does not
 change `assets`, its hosting relation or any directory rule.
 
 ## Limitations

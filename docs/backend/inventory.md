@@ -1,17 +1,17 @@
-# Inventory slice and agent interfaces
+# Inventory service and agent interfaces
 
-Phase 3 delivered the first inventory slice: one canonical service
-reused by the REST API, the Pydantic AI assistant and the FastMCP server. Phase 4
-extends it with catalog-driven fields, lifecycle/history/media and configured
-quick codes; see `docs/backend/asset-core.md`, `docs/backend/inventory-catalog.md` and
-`docs/backend/inventory-identification.md`. This document describes the shared slice and
-the transport contracts.
+Inventory is one canonical service reused by the REST API, the Pydantic AI
+assistant and the FastMCP server. Catalog-driven fields, lifecycle/history/media
+and configured quick codes are covered in
+[Asset core: common fields, lifecycle, history and media](asset-core.md), [Inventory catalog and form configuration](inventory-catalog.md) and
+[Inventory identification, catalog validation and tool projections](inventory-identification.md). This document describes the shared service and
+its transport contracts.
 
 ## Data model
 
-Table `assets` (base migration `0003_inventory`, extended by the phase 4
+Table `assets` (base migration `0003_inventory`, extended by later
 revisions: `cost`, `technical`, `archived_at`, `archived_by`, history, media and
-code counters - see `docs/backend/asset-core.md`):
+code counters - see [Asset core: common fields, lifecycle, history and media](asset-core.md)):
 
 | Field | Bound | Notes |
 |---|---|---|
@@ -21,16 +21,16 @@ code counters - see `docs/backend/asset-core.md`):
 | `category`, `type`, `brand` | 1-64 | |
 | `model`, `serial`, `ip` | 1-80 | |
 | `site`, `location`, `responsible` | 1-120 | Legacy free-text labels; inventory people are not access accounts |
-| `siteId`, `locationId`, `responsiblePersonId` | UUID string (36), nullable | Canonical directory references; ids are the authority and the legacy text above mirrors their current label on read (`docs/backend/asset-organization.md`). An explicit `null` clears the reference and its text; clearing or switching the site also drops the stored location and position unless a replacement `locationId` is sent |
+| `siteId`, `locationId`, `responsiblePersonId` | UUID string (36), nullable | Canonical directory references; ids are the authority and the legacy text above mirrors their current label on read ([Asset organization: sites, locations, people, positions and map data](asset-organization.md)). An explicit `null` clears the reference and its text; clearing or switching the site also drops the stored location and position unless a replacement `locationId` is sent |
 | `positionX`, `positionY` | `0..1`, 6 decimals, nullable | Optional relative plan position, only with a `locationId` |
-| `status` | catalog status ids | Defaults to `in_use`; active catalog statuses and transitions apply (`docs/backend/inventory-catalog.md`) |
+| `status` | catalog status ids | Defaults to `in_use`; active catalog statuses and transitions apply ([Inventory catalog and form configuration](inventory-catalog.md)) |
 | `description` | 1-1000 | |
 | `createdAt`, `updatedAt` | server clock | UTC, ISO-8601 in payloads |
 
 `quickCode` normalization lowercases the stored key used for uniqueness while
 the visible value keeps the caller's casing. Allocation follows the configured
 identification rule and holds a serialized transaction lock; see
-`docs/backend/inventory-identification.md`. Sending `id` in an update or batch
+[Inventory identification, catalog validation and tool projections](inventory-identification.md). Sending `id` in an update or batch
 update is rejected (`422`); sending an unknown field is rejected at every door.
 The stable API vocabulary uses `in_use`; the UI may label it in Spanish.
 
@@ -107,7 +107,7 @@ machine bearers are exempt from CSRF but still authorized through Casbin.
   `InventoryService`, so it applies the same permissions and audit. There is no
   shell, SQL, filesystem or HTTP tool, and the model cannot introduce one from
   conversation text. Outputs are compact asset summaries with an optional
-  `fields` projection (`docs/backend/inventory-identification.md`).
+  `fields` projection ([Inventory identification, catalog validation and tool projections](inventory-identification.md)).
 - Missing asset/field data must be requested from the person, never invented;
   the instructions tell the model to ask instead of guessing.
 - Provider/model come only from server configuration. If it is not configured
@@ -151,7 +151,7 @@ from the application lifespan; no second server process is needed.
   `search_locations`, `search_people`, `assign_asset`, `return_asset`,
   `transfer_asset`, `get_asset_relations`, `create_relationship`,
   `remove_relationship`, `move_host` and `get_asset_map`. The REST surface is
-  not exported automatically; see `docs/backend/asset-organization.md`.
+  not exported automatically; see [Asset organization: sites, locations, people, positions and map data](asset-organization.md).
 - Tool outputs are compact camelCase asset summaries with the optional `fields`
   projection; errors use safe messages.
 - Scopes reported by the verifier are the identity's effective permissions, so
@@ -185,3 +185,16 @@ purge UX. Typed relationships, canonical organization references, structured
 history and map queries are covered; the graph endpoint may omit an edge
 endpoint because of the node budget, which consumers must handle explicitly.
 This is not a general security certification.
+
+### Inactive category assignments
+
+Creating an asset or changing it to a catalog category requires that category to
+be active, resolved by stable id or translated label. Existing assets retain an
+inactive category, remain readable/editable, and may repeat its equivalent label
+without acquiring a new assignment. Unknown legacy category text remains supported.
+
+## Local UI limits
+
+Local field/form/status/identification configuration uses the existing `assets.edit` evaluator rather than an unconditional editing grant. Missing permission hides destructive controls; existing guarded methods remain the mutation boundary. Installed catalog configuration retains its existing `config.categories` / `config.general` checks. Appearance administration likewise denies mutations when its permission evaluator is absent.
+
+Local asset deletion already opens the existing delete dialog: no data changes merely by opening it. Local development mode does not require typing the UUID/reason; local production mode keeps that extra confirmation. Installed inventory purge remains server-policy-owned. The dialog adds no approval state or backend bypass and does not equate confirmation with authorization.

@@ -95,8 +95,7 @@ consumers; do not run differently labelled one-shot containers against live volu
 
 After installation and after a late migration, execute a real authenticated task
 and verify its completed result. Readiness alone does not prove that the worker
-can access shared queue storage. See the Phase11 report for the fresh-volume and
-cross-consumer roundtrip evidence.
+can access shared queue storage.
 
 
 ### Integrated database first
@@ -438,7 +437,7 @@ Supply `ITSM_AGENT_MODEL` and the selected provider credential through the exter
 environment, then recreate the backend intentionally. No configured model means a truthful
 503 from `/api/v1/agent/chat`, not fake conversational success. List/detail/CRUD/search
 remain usable. Simple operations are direct; the Huey worker is not mandatory for each
-tool call. This phase adds no shell, raw SQL, arbitrary URL-fetch or OS tools.
+tool call. The agent gets no shell, raw SQL, arbitrary URL-fetch or OS tools.
 
 The existing backend mounts streamable HTTP MCP at `/api/v1/mcp`; no extra MCP container
 or whole-REST-API export is needed. Use an explicitly installed machine identity/token
@@ -541,9 +540,9 @@ Docker reference: [Compose networking and host gateway](https://docs.docker.com/
 
 ### Maintenance reminder preparation
 
-Phase 7 adds persisted preventive plans, interventions and technical incidents. Apply
+Maintenance adds persisted preventive plans, interventions and technical incidents. Apply
 migrations explicitly before API/worker startup. The original Vue maintenance screens
-use these APIs. Phase 8 links monitoring events to incidents, but acknowledgement,
+use these APIs. Monitoring links its events to incidents, but acknowledgement,
 recovery and closure stay separate: acknowledgement never resolves, recovery never
 auto-closes an incident, and closing remains an explicit human decision with an
 assisted-close suggestion.
@@ -557,7 +556,7 @@ scans idempotent. Queue retry settings remain `ITSM_TASK_RETRIES` and
 
 Observe the structured worker event `maintenance.reminders_prepared` and its `created`
 and `scanned` counters. Preparation never completes a plan, resolves an incident or
-sends email/Telegram. Delivery is owned by the Phase 8 notification service described
+sends email/Telegram. Delivery is owned by the notification service described
 above; the maintenance scan only prepares durable reminder rows.
 See `docs/backend/maintenance.md`, `docs/backend/interventions.md` and
 `docs/backend/agent-tools.md` for operation and permission contracts.
@@ -578,13 +577,13 @@ Images use exact version tags and registry digests, not `latest`. Dependencies a
 - MariaDB: use `mariadb-dump --single-transaction` for transactional tables with approved external credentials, then import into a fresh database using `mariadb`. Coordinate schema changes and file uploads with the SQL snapshot. Run migrations/readiness and authenticated checks after restore.
 - SQL Server: use the database operator's native full backup/restore procedure, including encryption keys/certificates where configured. SQL Server compatibility is not validated; do not infer it from the SQLAlchemy URL or another engine's results.
 - SQLite main DB: use SQLite's online backup API/`.backup`, not a casual copy of a live WAL database. For a cold file backup, stop the owned API/worker first and include a consistent database/WAL state.
-- Huey SQLite: pause this workspace's API enqueue/worker, back up the entire queue volume consistently; restoring it may replay jobs. Phase 6 jobs use durable per-row receipts in main SQL to avoid replaying successful rows. Do not restore queue state independently of related business data without considering duplicate effects.
+- Huey SQLite: pause this workspace's API enqueue/worker, back up the entire queue volume consistently; restoring it may replay jobs. Import jobs use durable per-row receipts in main SQL to avoid replaying successful rows. Do not restore queue state independently of related business data without considering duplicate effects.
 - Attachments: back up `attachment-data` together with a consistent main SQL snapshot. SQL stores metadata and opaque blob keys, not file bytes. Restoring only SQL or only the volume is incomplete. Coordinate uploads/deletions during backup and rehearse authenticated downloads after restoring to isolated state. Do not delete unknown blobs as an improvised cleanup operation; interrupted writes may leave unreferenced objects requiring an explicitly authorized reconciliation.
 - Optional Redis: persist AOF and back up consistently using Redis procedures. Prometheus: back up its owned `prometheus-data` volume cold (stop the service or snapshot the filesystem) or use its supported TSDB procedure; retention is not a backup. Alertmanager state (silences and notification log) lives in `alertmanager-data`; back it up separately. Notification outbox, inbox and delivery history live in main SQL and follow the SQL backup procedure. Restoring metrics or Alertmanager state is independent of inventory availability.
 - Back up root/frontend/backend repositories separately, external settings and named volumes. Never commit backup files or secrets.
 - Appearance presets, logo metadata, published appearance and integration settings are in main SQL; logo/document bytes are in the opaque attachment store. Restore both consistently. Reapply external origins/base URLs, cookie policy, provider credentials, client credentials, notification references/tokens and engine credentials through the approved secret mechanism. SQL/files do not recover externally managed secrets automatically. Do not rotate or disclose them during a rehearsal.
 - Meilisearch is derived state: after SQL/files and current authorization are restored, request the guarded search rebuild and observe its terminal result. Temporary-index swap preserves the prior index on failure; SQL fallback remains usable. Its volume is optional for recovery, not the canonical inventory backup.
-- Rehearse recovery in a new isolated Compose project/volumes before replacing production. No backup/restore against existing server services is performed by this phase.
+- Rehearse recovery in a new isolated Compose project/volumes before replacing production. These instructions run no backup or restore against existing server services.
 
 ## Checks and inspection
 

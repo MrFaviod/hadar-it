@@ -1,4 +1,4 @@
-# Phase 9 connected report surfaces
+# Reports, labels and QR codes (frontend)
 
 The original Vue report, label, QR and settings views remain in the existing React host. The server owns selection, projections, templates, document jobs, files and public shares. The browser keeps no document history, queue or labels in `localStorage`; the only anonymous call is a public report read whose capability is the share token.
 

@@ -1,4 +1,4 @@
-# Agent and MCP operational tools
+# Compact operational tools for agents and MCP
 
 The conversational agent (`itsm/agents/runtime.py`) and the mounted FastMCP server
 (`itsm/mcp/server.py`) expose the same compact operational tools on top of the

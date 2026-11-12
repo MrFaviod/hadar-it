@@ -1,17 +1,19 @@
-# Extensiones: interfaz y revisión (SDK 2)
+# Extensions: interface and review (SDK v2)
 
-Este documento describe el contrato de interfaz que el host aplica a las extensiones. El servidor es la autoridad de instalación, permisos y ejecución; el navegador solo dibuja las vistas declaradas y, cuando corresponde, aísla el código del módulo. Una extensión nunca importa componentes privados ni modifica archivos Vue del núcleo.
+The interface contract the host applies to extensions. The server is the authority for installation, permissions and execution; the browser only draws the declared views and, where needed, isolates the module's code. An extension never imports private components or modifies core Vue files.
 
-## Principios
+For the package format, operations and lifecycle on the server, see the [backend extension SDK](../backend/extensions-sdk.md) and the [extension host](../backend/extensions-host.md).
 
-- **Sin código del módulo en la página.** El host no crea etiquetas `<script>` para una extensión. `frontend.pages`, `frontend.assetPanels` y `frontend.widgets` declaran vistas que el host dibuja con sus propios componentes y tokens.
-- **Aislamiento para código propio.** Una vista `isolated` se ejecuta en un `<iframe sandbox="allow-scripts">` con origen opaco. El documento aprobado no recibe cookies, sesión, `localStorage`, DOM del host ni acceso de red (`connect-src 'none'`). Esa CSP no impide que el marco se navegue a otro documento y el atributo `sandbox` no tiene una bandera para bloquearlo: por eso el host solo entrega el identificador del activo, no sus datos, y trata cualquier navegación del marco como terminal.
-- **Autoridad del servidor.** Cada operación se invoca por HTTP con la cookie de sesión, Origin y CSRF del host. `can()` en el navegador solo oculta controles; Casbin decide en el servidor.
-- **SDK 1 no se ejecuta.** Un módulo con `manifest.sdkVersion: 1` o `status: "requires_upgrade"` aparece como **Requiere actualización** y no expone páginas, paneles, widgets ni acciones. Sus datos se conservan.
+## Principles
 
-## Vistas declarativas
+- **No module code in the page.** The host never creates `<script>` tags for an extension. `frontend.pages`, `frontend.assetPanels` and `frontend.widgets` declare views that the host draws with its own components and tokens.
+- **Isolation for custom code.** An `isolated` view runs in an `<iframe sandbox="allow-scripts">` with an opaque origin. The approved document receives no cookies, session, `localStorage`, host DOM or network access (`connect-src 'none'`). That CSP does not stop the frame from navigating to another document, and the `sandbox` attribute has no flag to block it: that is why the host only hands over the asset identifier, not its data, and treats any navigation of the frame as terminal.
+- **Server authority.** Every operation is invoked over HTTP with the host's session cookie, Origin and CSRF. `can()` in the browser only hides controls; Casbin decides on the server.
+- **SDK 1 does not run.** A module with `manifest.sdkVersion: 1` or `status: "requires_upgrade"` appears as **Requires an update** and exposes no pages, panels, widgets or actions. Its data is kept.
 
-`frontend.pages`, `assetPanels` y `widgets` comparten la misma forma:
+## Declarative views
+
+`frontend.pages`, `assetPanels` and `widgets` share the same shape:
 
 ```json
 {
@@ -23,7 +25,7 @@ Este documento describe el contrato de interfaz que el host aplica a las extensi
 }
 ```
 
-`view` debe declarar exactamente una de estas variantes:
+`view` must declare exactly one of these variants.
 
 ### `view.table`
 
@@ -42,14 +44,14 @@ Este documento describe el contrato de interfaz que el host aplica a las extensi
 }
 ```
 
-- `operation` es una operación declarada por esta extensión.
-- `columns` admite de 1 a 12 campos; `format` es `text` (por defecto), `date`, `date-time`, `number` o `boolean`, con la ortografía de JSON Schema. `date` y `date-time` usan el locale `es-ES` del host, igual que `number` con `Intl.NumberFormat('es-ES')` para números finitos. Un valor que no es número se dibuja como texto.
-- Las filas son los registros del almacén del módulo, `{ "id", "version", "data" }`, dentro de `{ "items", "total" }`; `field` nombra una clave de `data` (además están `id` y `version`). Una respuesta con objetos planos también se dibuja tal cual.
-- `filterAsset` es el **nombre** donde el host coloca el id permanente del activo abierto (UUID), y su significado depende del tipo de la operación:
-  - operación declarativa `list`: debe ser una propiedad declarada de la colección y el host la envía dentro de `filters`, sin otras claves: `{ "limit": 10, "offset": 0, "filters": { "<filterAsset>": "<uuid>" } }`.
-  - operación `handler`: debe ser un parámetro declarado por la operación y el host la envía como argumento de nivel superior: `{ "limit": 10, "offset": 0, "<filterAsset>": "<uuid>" }`.
-- La tabla pide `{ limit, offset }` (10 filas por página) y pagina con **Anterior** / **Siguiente**; solo afirma el total que devolvió el servidor.
-- `form` opcional añade el formulario de alta bajo la tabla. Al guardar, la tabla vuelve a cargar su primera página.
+- `operation` is an operation declared by this extension.
+- `columns` accepts 1 to 12 fields; `format` is `text` (default), `date`, `date-time`, `number` or `boolean`, spelled as in JSON Schema. `date` and `date-time` use the host's `es-ES` locale, as does `number` with `Intl.NumberFormat('es-ES')` for finite numbers. A value that is not a number is drawn as text.
+- Rows are records from the module's store, `{ "id", "version", "data" }`, inside `{ "items", "total" }`; `field` names a key of `data` (plus `id` and `version`). A response with flat objects is also drawn as is.
+- `filterAsset` is the **name** under which the host places the permanent id (UUID) of the open asset. Its meaning depends on the operation type:
+  - declarative `list` operation: it must be a declared property of the collection, and the host sends it inside `filters` with no other keys: `{ "limit": 10, "offset": 0, "filters": { "<filterAsset>": "<uuid>" } }`.
+  - `handler` operation: it must be a parameter declared by the operation, and the host sends it as a top-level argument: `{ "limit": 10, "offset": 0, "<filterAsset>": "<uuid>" }`.
+- The table requests `{ limit, offset }` (10 rows per page) and pages with **Previous** / **Next**; it only states the total the server returned.
+- The optional `form` adds a creation form under the table. After saving, the table reloads its first page.
 
 ### `view.form`
 
@@ -67,10 +69,10 @@ Este documento describe el contrato de interfaz que el host aplica a las extensi
 }
 ```
 
-- `input`: `text`, `textarea`, `number`, `date`, `select` o `checkbox`. `select` exige `options` (cadenas o `{ value, label }`).
-- `required` se valida antes de enviar; los campos vacíos opcionales se omiten.
-- `assetField` se rellena con el id del activo abierto. En una operación `handler` viaja como argumento de nivel superior, junto al resto de los campos. En una operación declarativa `put` viaja dentro de `data`, junto a los campos del registro: `{ "data": { "<assetField>": "<uuid>", ... } }`. El servidor genera el `record_id` cuando el formulario no edita un registro existente.
-- El servidor responde con el registro creado; sus errores se muestran tal como llegan. El host no inventa éxito ni filas.
+- `input`: `text`, `textarea`, `number`, `date`, `select` or `checkbox`. `select` requires `options` (strings or `{ value, label }`).
+- `required` is validated before sending; empty optional fields are omitted.
+- `assetField` is filled with the id of the open asset. In a `handler` operation it travels as a top-level argument, alongside the other fields. In a declarative `put` operation it travels inside `data`, alongside the record fields: `{ "data": { "<assetField>": "<uuid>", ... } }`. The server generates the `record_id` when the form is not editing an existing record.
+- The server responds with the created record; its errors are shown as they arrive. The host never invents success or rows.
 
 ### `view.isolated`
 
@@ -78,17 +80,30 @@ Este documento describe el contrato de interfaz que el host aplica a las extensi
 { "isolated": { "component": "LicensePanel", "height": 420 } }
 ```
 
-Solo una extensión `runtime: "sandboxed"` puede declararla, y requiere `frontend.entry` con `frontend.js`. El host descarga ese archivo desde la URL firmada por digest (`/api/v1/extensions/<id>/frontend.js?digest=<sha256>`), exige que la ruta y el digest coincidan con el id y el digest de esa misma extensión, y lo inserta en el documento del marco junto al build global de Vue vendorizado. El módulo se registra dentro del marco:
+Only a `runtime: "sandboxed"` extension can declare it, and it requires `frontend.entry` with `frontend.js`. The host downloads that file from the digest-signed URL (`/api/v1/extensions/<id>/frontend.js?digest=<sha256>`), requires the path and digest to match the id and digest of that same extension, and inserts it into the frame's document next to the vendored global Vue build. The module registers itself inside the frame:
 
 ```js
-window.ITSMExtension.register({ components: { LicensePanel: { template: '<p>{{ assetId }}</p>', props: ['assetId', 'sdk'] } } });
+window.ITSMExtension.register({
+  components: {
+    LicensePanel: {
+      props: ['assetId', 'sdk'],
+      render() { return Vue.h('p', this.assetId || ''); }
+    }
+  }
+});
 ```
 
-El componente recibe `assetId` (el UUID del activo abierto, no su contenido), `permissions` y `sdk` con `request(operation, args)`, `can(permission)`, `navigate(page | '#/ruta')` y `assetId`. Los datos del activo y del módulo se piden con operandos declarados y con permiso: el host no incluye el registro del activo en `itsm:init`. El marco puede usar los componentes mínimos del kit (`ItsmTable`, `ItsmField`, `ItsmStatus`, `ItsmButton`), que toman la paleta del tema actual mediante un mensaje del host.
+**Render-function contract.** Isolated components must ship a `render` function written by hand or precompiled by the author. Raw templates and runtime compilation (`Vue.compile`, `eval`, `new Function`) are not supported. The host adds no compiler, pipeline or configuration. The bundle runs only inside the frame; it is never evaluated in the privileged host.
 
-El host acepta un único `itsm:ready` por marco. Si el marco carga otro documento, el host cierra el puente y deja de responder mensajes, temas y resultados pendientes. Esa frontera no puede impedir que un módulo exfiltre los datos que su propia operación autorizada le devuelve; un módulo con permiso de lectura del activo siempre puede hacerlo.
+Before mounting, every registered component is checked, including unselected siblings and local components, as well as `mixins` and `extends` options. A defined `template`, even alongside `render`, or a registered or local component without a render function produces a translated error visible in the frame, and nothing is mounted. Functional components are supported; mixins and extends that only contribute options do not need their own render. The extension as a whole and its declarative views are not withdrawn. `itsm:ready` only signals that the bridge is available, not that rendering succeeded.
 
-## Acciones sobre activos
+Migrating: an earlier example with `template: '<p>{{ assetId }}</p>'` was documented, but the enforcing CSP prevented compiling it. Replace it with the render example above, or ship a precompiled artifact compatible with Vue 3.5.13 that includes its render functions and never invokes the compiler at runtime. Migrate local components, siblings, mixins and extends that contribute templates too, and remove the `template` property from the final artifact. Authors keep their own build process: the host neither compiles nor installs packages. The frame's CSP meta tag stays enforcing, separate from the host's diagnostic Report-Only header.
+
+The component receives `assetId` (the UUID of the open asset, not its content), `permissions`, and `sdk` with `request(operation, args)`, `can(permission)`, `navigate(page | '#/ruta')` and `assetId`. Asset and module data are requested through declared operations and with permission: the host does not include the asset record in `itsm:init`. The frame can use the kit's minimal components (`ItsmTable`, `ItsmField`, `ItsmStatus`, `ItsmButton`), which take the current theme palette from a host message.
+
+The host accepts a single `itsm:ready` per frame. If the frame loads another document, the host closes the bridge and stops answering messages, themes and pending results. That boundary cannot stop a module from exfiltrating data its own authorized operation returns to it; a module with read permission on the asset can always do so.
+
+## Asset actions
 
 ```json
 {
@@ -102,32 +117,32 @@ El host acepta un único `itsm:ready` por marco. Si el marco carga otro document
 }
 ```
 
-La acción aparece en el detalle del activo cuando la cuenta tiene el permiso. Si declara `confirm`, el host pide confirmación en su diálogo nativo antes de invocar la operación con `{ assetId }`. El resultado se informa en la propia barra de acciones.
+The action appears on the asset detail when the account has the permission. If it declares `confirm`, the host asks for confirmation in its native dialog before invoking the operation with `{ assetId }`. The result is reported in the action bar itself.
 
-## Contribuciones adicionales
+## Additional contributions
 
-`frontend.contributions` solo permite dos modos dentro del catálogo cerrado del host:
+`frontend.contributions` allows only two modes within the host's closed catalog:
 
-- `add`: añade una vista declarativa a un destino existente (`page.*`, `widget.*`, `asset.panel.*`, `config.*`).
-- `hide`: oculta un destino del núcleo. Los destinos de administración (`config.seguridad`, `config.extensiones`, `nav.system`, etc.) nunca son componibles.
+- `add`: adds a declarative view to an existing target (`page.*`, `widget.*`, `asset.panel.*`, `config.*`).
+- `hide`: hides a core target. Administration targets (`config.seguridad`, `config.extensiones`, `nav.system`, etc.) can never be composed.
 
-Los destinos de navegación solo admiten `hide`. No existe `replace` ni registro de componentes del host: un módulo no puede sustituir la interfaz del núcleo.
+Navigation targets only accept `hide`. There is no `replace` and no host component registration: a module cannot substitute the core interface.
 
-## Límites del contrato
+## Contract limits
 
-- Máximo 50 contribuciones por colección y 12 columnas / 30 campos por vista.
-- Ids de página, panel, widget y acción: minúsculas con guiones; operaciones: minúsculas con guiones bajos.
-- El host no acepta `component` en una vista declarativa ni rutas `file://`.
-- Una extensión desactivada conserva su catálogo de permisos marcado como inactivo, pero no renderiza vistas.
+- At most 50 contributions per collection, and 12 columns / 30 fields per view.
+- Page, panel, widget and action ids: lowercase with hyphens; operations: lowercase with underscores.
+- The host accepts no `component` in a declarative view and no `file://` paths.
+- A disabled extension keeps its permission catalog marked as inactive, but renders no views.
 
-## Revisión y administración
+## Review and administration
 
-La pantalla **Configuración → Extensiones** (`#/configuracion/extensiones`) es la única superficie de administración y requiere `system.modules`:
+**Settings → Extensions** (`#/configuracion/extensiones`) is the only administration surface and requires `system.modules`:
 
-- **Ejecución**: *Declarativa* (sin código en la página) o *Código aislado* (frontend en marco aislado).
-- **Capacidades** declaradas, con su descripción en español, y **Almacenamiento**: *Base SQLite propia* cuando el manifiesto lo declara.
-- **Estado** por módulo instalado: tamaño del almacenamiento, versión de esquema, eventos detenidos y disponibilidad del entorno restringido, tal como los informa `GET /extensions/{id}/status`.
-- **Desinstalar** (`POST /extensions/{id}/uninstall` con `expectedVersion`): retira el paquete y su interfaz, y **conserva** la base SQLite y el historial de la extensión.
-- **Rollback**: si el esquema es compatible, se aplica directamente; si no, el host ofrece restaurar la copia previa con `restoreData: true` y una confirmación escrita con el identificador exacto. Sin esa confirmación no se envía nada.
+- **Runtime**: *Declarative* (no code in the page) or *Isolated code* (frontend in an isolated frame).
+- Declared **Capabilities**, with their description, and **Storage**: *Own SQLite database* when the manifest declares it.
+- **Status** per installed module: storage size, schema version, stopped events and availability of the restricted environment, as reported by `GET /extensions/{id}/status`.
+- **Uninstall** (`POST /extensions/{id}/uninstall` with `expectedVersion`): removes the package and its interface, and **keeps** the extension's SQLite database and history.
+- **Rollback**: if the schema is compatible, it applies directly; otherwise the host offers to restore the previous copy with `restoreData: true` and a typed confirmation of the exact identifier. Without that confirmation nothing is sent.
 
-La aprobación sigue siendo humana y usa CAS (`expectedVersion` = revisión entera informada por el servidor). El frontend nunca deriva autoridad de sus propias comprobaciones.
+Approval stays human and uses compare-and-set (`expectedVersion` = the integer revision reported by the server). The frontend never derives authority from its own checks.

@@ -1,6 +1,6 @@
-# canonical Mapa and Grafo explorer
+# Map and graph explorer
 
-The operational explorer keeps its original routes, templates, design tokens,
+The infrastructure explorer (**Map** and **Graph** views) keeps its original routes, templates, design tokens,
 icons, keyboard behavior, light/dark themes and 390 px layout. It now reads the
 canonical directory, `/map`, `/infrastructure/graph` and authenticated directory
 media instead of the prototype-only map model.

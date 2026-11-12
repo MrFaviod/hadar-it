@@ -1,126 +1,126 @@
-# Conversación e IA en ITSM
+# Conversation and AI
 
-La conversación autenticada puede permanecer abierta mientras trabajas en los módulos permitidos. El panel compacto y la página **Conversación** comparten una sola instancia, el borrador y la transcripción; cambiar de ruta no vuelve a enviar mensajes ni cancela el flujo activo.
+The authenticated conversation can stay open while you work in the modules you are allowed to use. The compact panel and the **Conversation** page share one instance, draft and transcript; changing route does not resend messages or cancel the active stream.
 
-## Abrir, ampliar y recuperar
+This guide covers the user-facing conversation, engine and model selection, AI providers in **Settings → AI**, agent profiles and installations, and the daily AI quota. The transport and API contracts are in [Agent engines and integrations](agent-integrations.md).
 
-1. Usa **Abrir conversación** en la esquina inferior derecha. El panel empieza cerrado y no bloquea el módulo con un fondo modal.
-2. Escribe y pulsa **Enviar**. **Cancelar** solicita la cancelación del trabajo en curso; los errores y el estado comunicado por el servidor se muestran en el panel.
-3. Usa **Ampliar conversación** para abrir `#/conversacion`. **Volver al chat compacto** recupera el módulo anterior con el mismo estado.
-4. **Cerrar conversación** o `Escape` ocultan el panel compacto y devuelven el foco al botón de apertura. Ocultar el panel no cancela una respuesta.
-5. En **Tus conversaciones**, elige una conversación propia para consultar su transcripción del servidor. **Nueva conversación** empieza otra conversación sin reenviar la anterior. Si hay una respuesta activa, termina o cancela esa respuesta antes de cambiar de conversación.
-6. Las respuestas largas se desplazan dentro del panel compacto sin superponerse a las herramientas ni al compositor; este permanece accesible en pantallas pequeñas.
+## Open, expand and resume
 
-Cerrar sesión, cambiar de usuario o desmontar la aplicación aborta las solicitudes locales y borra el estado privado de la conversación. Las respuestas tardías no pueden restaurarlo. El servidor mantiene la autoridad sobre la identidad, los permisos y la propiedad de cada conversación.
+1. Use **Open conversation** in the bottom-right corner. The panel starts closed and does not block the module with a modal backdrop.
+2. Type and press **Send**. **Cancel** requests cancellation of the work in progress; errors and the state reported by the server are shown in the panel.
+3. Use **Expand conversation** to open `#/conversacion`. **Back to compact chat** returns to the previous module with the same state.
+4. **Close conversation** or `Escape` hides the compact panel and returns focus to the open button. Hiding the panel does not cancel a response.
+5. In **Your conversations**, choose one of your conversations to read its transcript from the server. **New conversation** starts another conversation without resending the previous one. If a response is active, let it finish or cancel it before switching conversations.
+6. Long responses scroll inside the compact panel without overlapping the tools or the composer, which stays reachable on small screens.
 
-### Contexto de activos y demostraciones
+Signing out, switching users or unmounting the application aborts local requests and erases the private conversation state. Late responses cannot restore it. The server keeps authority over identity, permissions and ownership of each conversation.
 
-- **Usar este activo como contexto** exige un registro canónico recibido del servidor. También puedes elegir un activo conocido en **Activo en contexto** o abrir su ruta de conversación explícita.
-- La URL con un UUID, por sí sola, no convierte un registro de demostración en contexto válido. El registro se consulta mediante el adaptador de inventario existente.
-- Las alertas de demostración no se presentan como una integración con el agente o con un backend de supervisión.
+### Asset context and demo data
 
-## Motores, modelos y preferencias
+- Using an asset as context requires a canonical record received from the server. You can also choose a known asset in **Asset in context (optional)** or open its explicit conversation route.
+- A URL with a UUID does not, on its own, turn a demo record into valid context. The record is read through the existing inventory adapter.
+- Demo alerts are not presented as an integration with the agent or with a monitoring backend.
 
-Elige un motor habilitado y uno de sus modelos explícitamente anunciados. Si ya existe una conversación, el cambio usa `PATCH /agent/sessions/{id}` sobre su mismo identificador y conserva la transcripción. No se crea otra conversación para esconder un rechazo del servidor. No se reproducen las llamadas a herramientas anteriores.
+## Engines, models and preferences
 
-«Motor» muestra una sola opción por motor externo y «Perfil» elige un perfil autorizado de ese motor, solo cuando el servidor anuncia más de uno. Las opciones se derivan de las instancias autorizadas (nombre o perfil), nunca de rutas, endpoints ni credenciales del cliente. Cambiar de perfil aplica el mismo `PATCH` a la misma sesión ITSM: conserva los mensajes, el borrador y el identificador, y reinicia únicamente la sesión nativa del motor; no cambia el perfil global de Hermes. La preferencia del chat en Configuración → IA usa el mismo agrupamiento Motor/Perfil y solo se aplica a conversaciones nuevas. Cada proveedor Pydantic, global o personal, mantiene su propia opción de motor.
+Choose an enabled engine and one of its explicitly announced models. If a conversation already exists, the change uses `PATCH /agent/sessions/{id}` on the same identifier and keeps the transcript. No new conversation is created to hide a server rejection. Earlier tool calls are not replayed.
 
-La preferencia guardada del usuario sirve como valor inicial de una conversación nueva. Recuperar una conversación conserva su motor y modelo propios sin sustituir esa preferencia; tampoco se cambia silenciosamente a otro modelo si el de la conversación deja de estar disponible. La selección no amplía los permisos del usuario ni los límites del perfil de integración.
+**Engine** shows one option per external engine and **Profile** chooses an authorized profile of that engine, only when the server announces more than one. Options are derived from authorized instances (name or profile), never from client paths, endpoints or credentials. Changing profile applies the same `PATCH` to the same ITSM session: it keeps messages, draft and identifier, and restarts only the engine's native session; it does not change the global Hermes profile. The conversation preference in **Settings → AI** uses the same Engine/Profile grouping and applies only to new conversations. Each Pydantic provider, global or personal, keeps its own engine option.
 
-El panel compacto prioriza la transcripción y el compositor. Las capacidades y la explicación del presupuesto se mantienen en la vista completa. Los motores sin modelos, los fallos de descubrimiento, las credenciales ausentes y los rechazos se muestran como tales; no se simula una respuesta correcta. Si el servidor no ofrece la API de sesiones, se conserva la ruta de chat anterior existente, sin inventar disponibilidad de un motor.
+The user's saved preference is the starting value for a new conversation. Resuming a conversation keeps its own engine and model without replacing that preference; it also does not silently switch to another model if the conversation's model becomes unavailable. The selection does not widen the user's permissions or the integration profile's limits.
 
-### Evidencia de consumo de la última llamada
+The compact panel gives priority to the transcript and the composer. Capabilities and the budget explanation stay in the full view. Engines without models, discovery failures, missing credentials and rejections are shown as such; a successful response is never simulated. If the server does not offer the sessions API, the existing earlier chat route is kept, without inventing an engine's availability.
 
-`#conversation-usage` muestra solo el último evento de uso recibido, no el total
-de la ejecución. La precisión (`measured`, `estimated`, `unavailable`) se presenta
-separada del origen (`provider`, `engine`, `estimate`, `none`); proveedor y motor
-son orígenes válidos, no precisiones desconocidas. Entrada, salida, caché leída,
-caché escrita, razonamiento y total conservan sus valores nulos como **no
-disponible**, sin convertirlos en cero ni sumar componentes incluidos de nuevo.
-Los indicadores del servidor aclaran si la caché ya está incluida en la entrada
-y el razonamiento en la salida; el total indica su origen y una estimación
-muestra su método. Los saldos y reportes diarios, no el último evento del flujo,
-representan el consumo acumulado.
+### Usage of the last call
 
-## Proveedores en Configuración → IA
+`#conversation-usage` shows only the last usage event received, not the total for
+the run. Precision (`measured`, `estimated`, `unavailable`) is shown separately
+from source (`provider`, `engine`, `estimate`, `none`); provider and engine are
+valid sources, not unknown precisions. Input, output, cache read, cache written,
+reasoning and total keep their null values as **Not available**, without turning
+them into zero or adding already-included components again. The server's flags
+state whether cache is already included in input and reasoning in output; the
+total states its source and an estimate shows its method. Daily balances and
+reports, not the last stream event, represent accumulated usage.
 
-Los proveedores compatibles con OpenAI se muestran en el panel de IA existente y se utilizan mediante el motor **Pydantic AI**; no constituyen otro motor. Su configuración no sustituye el asistente existente de perfiles e instalaciones.
+## Providers in Settings → AI
 
-| Autoridad efectiva | Controles disponibles |
+OpenAI-compatible providers are shown in the existing AI panel and used through the **Pydantic AI** engine; they are not a separate engine. Their configuration does not replace the existing profile and installation wizard.
+
+| Effective authority | Available controls |
 | --- | --- |
-| Usuario sin permiso de administración | Estado público autorizado por el servidor; sin botones para añadir, editar o eliminar. |
-| Permiso `system.providers` y capacidad `canManageGlobal` | **Añadir proveedor global** y modificación de proveedores globales. |
-| Permiso explícito `agents.providers.personal` y capacidad `canManagePersonal` | **Añadir proveedor personal** y modificación de proveedores propios. No se concede por defecto al rol User. |
+| User without administration permission | Public status authorized by the server; no buttons to add, edit or delete. |
+| `system.providers` permission and `canManageGlobal` capability | **Add global provider** and editing global providers. |
+| Explicit `agents.providers.personal` permission and `canManagePersonal` capability | **Add personal provider** and editing your own providers. Not granted to the User role by default. |
 
-El formulario pide nombre, endpoint, identificadores de modelos —uno por línea—, estado habilitado y una credencial opcional de solo escritura. No hay descubrimiento ficticio de modelos. El servidor valida la URL y la autoridad: los endpoints personales deben ser HTTPS públicos, sin destinos privados ni redirecciones; la configuración global conserva la política del operador.
+The form asks for a name, endpoint, model identifiers — one per line —, enabled state and an optional write-only credential. There is no fictitious model discovery. The server validates the URL and the authority: personal endpoints must be public HTTPS, with no private destinations or redirects; global configuration keeps the operator's policy.
 
-La credencial nunca vuelve en la respuesta ni se precarga al editar. Dejarla vacía al editar conserva la existente. Solo se muestra **Credencial configurada** o **Sin credencial**. Si `credentialStorageAvailable` es falso, el campo queda deshabilitado y se explica que falta `ITSM_AI_CREDENTIAL_KEY` en el servidor. Los mensajes concretos de error del servidor permanecen visibles. Cambiar de usuario borra los metadatos, permisos de interfaz y cualquier credencial aún escrita en el formulario.
+The credential is never returned in the response or preloaded when editing. Leaving it empty when editing keeps the existing one. Only **Credential configured** or **No credential** is shown. If `credentialStorageAvailable` is false, the field is disabled with an explanation that `ITSM_AI_CREDENTIAL_KEY` is missing on the server. The server's specific error messages stay visible. Switching users erases the metadata, interface permissions and any credential still typed in the form.
 
-Eliminar exige una confirmación explícita. El panel se actualiza desde el servidor después de guardar o eliminar; no presenta un éxito local cuando la operación ha fallado.
+Deleting requires explicit confirmation. The panel refreshes from the server after saving or deleting; it never shows a local success when the operation failed.
 
-## Perfiles e instalaciones
+## Profiles and installations
 
-Se conserva el asistente existente: elección de instancia y perfil, detección del destino, configuración MCP, selección de skills e instalación/verificación. Un perfil configurado o una solicitud remota exportada no equivale a un perfil verificado. La interfaz muestra el resultado y los límites de verificación del servidor y del recibo, sin fabricar un resultado verificado.
+The existing wizard is kept: instance and profile choice, target detection, MCP configuration, skill selection and installation/verification. A configured profile or an exported remote request is not a verified profile. The interface shows the server's and the receipt's verification result and limits, without fabricating a verified result.
 
-OpenCode selecciona un espacio de trabajo y el campo **Perfil** muestra, deshabilitado, el perfil registrado en esa instancia: el asistente envía exactamente ese perfil, o ninguno si la instancia no declara perfil, y nunca lo sustituye por otro. Hermes conserva la selección editable de perfiles con nombre. La versión esperada debe corresponder al motor que se está verificando.
+OpenCode selects a workspace, and the **Profile** field shows, disabled, the profile registered on that instance: the wizard sends exactly that profile, or none if the instance declares no profile, and never substitutes another. Hermes keeps the editable selection of named profiles. The expected version must match the engine being verified.
 
-La comprobación aislada del 27 de octubre de 2026 ejecutó el asistente desde Configuración para OpenCode 2.1.2 y dos perfiles dedicados de Hermes 0.22.5. Los tres resultados persistieron **MCP: verificado · Perfil: verificado**, la skill `itsm-inventory`, 63 herramientas autorizadas y una consulta no mutante `search_assets`. Además, con el proveedor real configurado, una misma conversación pasó de Hermes a OpenCode y al segundo perfil de Hermes, completó una consulta autorizada en cada paso y conservó sus seis turnos. Un usuario común completó el recorrido con Pydantic AI 2.59.0; no recibió opciones de motores externos. Son comprobaciones de desarrollo aisladas, no una certificación de producción.
+An isolated check on 27 October 2026 ran the wizard from Settings for OpenCode 2.1.2 and two dedicated Hermes 0.22.5 profiles. All three results persisted **MCP: verified · Profile: verified**, the `itsm-inventory` skill, 63 authorized tools and a non-mutating `search_assets` query. In addition, with the real provider configured, one conversation moved from Hermes to OpenCode and to the second Hermes profile, completed an authorized query at each step and kept its six turns. A regular user completed the flow with Pydantic AI 2.59.0 and was offered no external engines. These are isolated development checks, not a production certification.
 
-## Comprobaciones y selectores
+## Checks and selectors
 
-El comando focalizado de componentes es:
+The focused component command is:
 
 ```sh
 node --test tests/conversation.test.cjs tests/agent-integrations.test.cjs tests/contextual-chat.test.cjs
 ```
 
-Estas pruebas ejecutan los componentes Vue reales y simulan únicamente la frontera HTTP. Cubren continuidad al navegar, aislamiento por identidad, reanudación y cambio de sesión/motor/modelo, autoridad de proveedores y el tratamiento de credenciales y errores. No prueban por sí solas la disposición visual, un motor externo real, la seguridad del almacenamiento del backend ni una instalación en un perfil real.
+These tests run the real Vue components and simulate only the HTTP boundary. They cover continuity while navigating, isolation by identity, resuming and switching session/engine/model, provider authority, and handling of credentials and errors. On their own they do not test the visual layout, a real external engine, the security of backend storage or an installation on a real profile.
 
-Para la comprobación de navegador en ambos temas y pantallas pequeñas:
+For the browser check in both themes and on small screens:
 
-- Apertura/cierre y foco: `#conversation-opener`, `#conversation-surface`; después de `Escape`, espera al siguiente render antes de comprobar el foco.
-- Cambio de formato: `#conversation-expand`, `#conversation-collapse`; conserva borrador, transcripción y respuesta activa al navegar.
-- Selección: `#conversation-session`, `#conversation-engine`, `#conversation-profile`, `#conversation-model`, `#conversation-asset`, `#conversation-input`.
-- Contexto canónico: `#conversation-use-asset` en la ficha de un activo recibido del servidor.
-- Autoridad de proveedores: `#provider-new-global`, `#provider-new-personal`; los botones ausentes no deben reaparecer al cambiar de cuenta.
-- Formulario: `#provider-form`, `#provider-name`, `#provider-url`, `#provider-models`, `#provider-key`; el campo de credencial debe estar vacío al editar y no aparecer en el estado leído.
+- Open/close and focus: `#conversation-opener`, `#conversation-surface`; after `Escape`, wait for the next render before checking focus.
+- Format change: `#conversation-expand`, `#conversation-collapse`; keep draft, transcript and active response while navigating.
+- Selection: `#conversation-session`, `#conversation-engine`, `#conversation-profile`, `#conversation-model`, `#conversation-asset`, `#conversation-input`.
+- Canonical context: `#conversation-use-asset` on the record of an asset received from the server.
+- Provider authority: `#provider-new-global`, `#provider-new-personal`; missing buttons must not reappear when switching accounts.
+- Form: `#provider-form`, `#provider-name`, `#provider-url`, `#provider-models`, `#provider-key`; the credential field must be empty when editing and absent from the read state.
 
-La verificación de navegador, la suite completa y los motores/perfiles reales son comprobaciones separadas. No se infiere su éxito de estas pruebas de componentes.
+Browser verification, the full suite and real engines/profiles are separate checks. Their success is not inferred from these component tests.
 
-## Cuota diaria de IA
+## Daily AI quota
 
-La conversación y el panel de preferencias muestran el saldo diario propio que
-devuelve `GET /api/v1/agent/usage/me`: empresa y cuenta personal por separado,
-con consumido, reservado, disponible, retenciones pendientes, legado sin
-atribuir y precisión. **Ilimitado** y **0 tokens · sin admisión** son estados
-distintos; un dato ausente se muestra como **No disponible**, nunca como cero.
-El contexto activo solo resalta la financiación que el servidor declara para el
-ámbito del proveedor de la instancia: una clave personal no se presenta como
-empresa y, si no hay ámbito, el saldo no se atribuye. El botón **Actualizar
-cuota**, el fin, la cancelación o el error de un flujo, el enfoque de la ventana
-y el regreso a la pestaña vuelven a consultar; no hay sondeo continuo y el
-navegador no reinicia el día por su cuenta. Al cerrar sesión o recibir `401` se
-borran los saldos y una respuesta tardía de la cuenta anterior se descarta.
+The conversation and the preferences panel show your own daily balance as
+returned by `GET /api/v1/agent/usage/me`: company and personal funding
+separately, with consumed, reserved, available, pending holds, unattributed
+legacy and precision. **Unlimited** and zero tokens with no admission are
+distinct states; missing data is shown as **Not available**, never as zero. The
+active context highlights only the funding the server declares for the provider
+scope of the instance: a personal key is not presented as company and, without
+a scope, the balance is not attributed. The **Refresh quota** button, the end,
+cancellation or failure of a stream, window focus and returning to the tab query
+again; there is no continuous polling and the browser never rolls the day over
+on its own. Signing out or receiving `401` clears the balances, and a late
+response for the previous account is discarded.
 
-En **Configuración → IA**, la política diaria, las excepciones y el reporte
-requieren `system.providers` en una cuenta humana. Se pueden fijar un límite de
-empresa y otro personal, elegir ilimitado o cero, cambiar la zona horaria y
-cancelar un cambio pendiente antes de que se aplique. Las excepciones se aplican
-a una cuenta real y a una financiación; **heredar** elimina la excepción y es
-distinto de fijar ilimitado o cero explícitos. El selector de cuentas usa la
-lista existente con `users.view`; sin ese permiso la interfaz pide el UUID y
-advierte que el nombre de usuario no sirve como identificador. El reporte
-respeta los filtros, la agrupación y los totales del servidor, muestra los nulos
-como no disponibles, no suma caché en el cliente, no pagina localmente y separa
-las retenciones pendientes del consumo liquidado y el legado sin atribuir.
+In **Settings → AI**, the daily policy, overrides and report require
+`system.providers` on a human account. You can set a company limit and a
+personal one, choose unlimited or zero, change the time zone and cancel a
+pending change before it applies. Overrides apply to a real account and one
+funding source; **Inherit** removes the override and is different from setting
+an explicit unlimited or zero. The account picker uses the existing list with
+`users.view`; without that permission the interface asks for the UUID and warns
+that a username does not work as an identifier. The report respects the
+server's filters, grouping and totals, shows nulls as not available, does not
+sum cache on the client, does not paginate locally, and separates pending holds
+from settled usage and unattributed legacy.
 
-El estado estricto de un motor solo se muestra si su DTO declara
-`mode: managed` y `enforcement: strict`; si falta el DTO se indica no disponible
-y no estricto, sin deducirlo del nombre del motor ni del modo proxy. Las
-retenciones no se liberan desde esta interfaz. El editor de instancias y el
-asistente permiten elegir, solo con `system.providers`, el modo gestionado con
-proveedor global habilitado, modelo predeterminado exacto y límite positivo de
-contexto de entrada declarado por el operador; o el modo directo con una
-excepción de empresa explícita. Esa excepción no convierte el modo directo en
-estricto. El límite de salida sigue configurado en el servidor; la interfaz no
-lo deduce del modelo ni declara aislamiento de red.
+An engine's strict state is shown only if its DTO declares `mode: managed` and
+`enforcement: strict`; if the DTO is missing it is shown as unavailable and not
+strict, never deduced from the engine name or the proxy mode. Holds are not
+released from this interface. The instance editor and the wizard let you choose,
+only with `system.providers`, managed mode with an enabled global provider, an
+exact default model and a positive input context limit declared by the
+operator; or direct mode with an explicit company exception. That exception does
+not make direct mode strict. The output limit stays configured on the server;
+the interface neither deduces it from the model nor claims network isolation.

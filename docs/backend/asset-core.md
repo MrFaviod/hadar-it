@@ -89,7 +89,7 @@ remove_image(principal, asset_id, role) -> None            # assets.edit
   a caller can override the generated quick code. It always allocates a new
   UUID, never inherits `archived_*`, never copies media, and records
   `reason="source:<id>"` in its `cloned` history row.
-- Batch keeps the phase 3 contract: at most 50 operations, every item is
+- Batch keeps the inventory contract: at most 50 operations, every item is
   authorized and validated before the first write, then one flush/commit.
   A denial or conflict leaves assets, history and media untouched; only the
   denied audit event exists.
@@ -104,7 +104,7 @@ the DTO: `images` maps the present roles to their read URL.
 
 ## REST API
 
-All routes live under the existing prefix (`/api/v1`) and keep the phase 3
+All routes live under the existing prefix (`/api/v1`) and keep the inventory
 status codes and error envelope `{"error": {"code", "message"}}`.
 
 | Method and path | Success | Permission / guards |
@@ -129,7 +129,7 @@ status codes and error envelope `{"error": {"code", "message"}}`.
 `false` only active ones, absent returns both. It is not a replacement for
 `status`.
 
-The asset payload is the phase 3 DTO plus the six new keys:
+The asset payload is the base inventory DTO plus six keys:
 
 ```json
 {

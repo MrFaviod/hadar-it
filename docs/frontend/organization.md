@@ -1,105 +1,102 @@
-# Directorio, relaciones, grafo y mapa con autoridad del servidor
+# Directory, relationships, graph and map
 
-Fase 5 conecta las superficies de organización de la interfaz con la API
-canónica. La UI sigue siendo Vue 3 con Options API y plantillas `index.html`;
-no se migra a SFC ni se introduce estado de dominio en React.
+How the organization screens of the interface use the canonical server API: people, departments, locations, relationships, the infrastructure graph and the site map. The UI is Vue 3 with the Options API and `index.html` templates; there are no single-file components and no domain state in React.
 
-## Mapa de componentes y contratos
+## Component map and contracts
 
-| Módulo | Responsabilidad | Contrato |
+| Module | Responsibility | Contract |
 |---|---|---|
-| `assets/js/organization-api.js` | Único adaptador de organización: personas, departamentos, ubicaciones, árbol, tipos de relación, relaciones, grafo, mapa e historial. Mantiene época monotónica, `AbortController` y errores por recurso. | `window.AssetOrganization.{data,computed,methods,map*,canonical*}` |
-| `OrganizationRelations` (`relations-views.js`) | Panel de relaciones de un activo: lista dirigida con etiqueta directa/inversa, alta/edición/baja y cambio de host. | props `asset`, `app`; usa `organization.relations`, `organization.types`, `organization.dialogs.*` |
-| `OrganizationRelationTypes` (`relations-views.js`) | Configuración del vocabulario de tipos (clave inmutable, etiquetas, contención, activo). | permiso `config.general`; rutas `/relationship-types` |
-| `GraphExplorer` | Reutiliza el motor y el diseño existentes sobre una fuente proxy acotada por el servidor. | `serverGraphMode`, `organizationGraphSource`, `organization.graph` |
-| `MapExplorer` + `FloorLogic` | Reutiliza el canvas de planos existente; convierte píxeles del lienzo a coordenadas relativas 0..1 y persiste posiciones. | `serverMapMode`, `organizationMapSource`, `saveOrganizationPosition` |
-| `AssetEditor` | Sustituye selectores de persona/sede/ubicación por los UUID canónicos que ya usa el adaptador de inventario. | `assetSiteLocations`, `assetActivePeople`, `app.sites` |
-| Página de personas | Lista, ficha, historial, asignar/devolver/trasladar con motivo, notas y fecha efectiva. | `/people`, `/people/{id}`, `/people/{id}/assets`, `/people/{id}/history`, `/assets/{id}/assign|return|transfer` |
+| `assets/js/organization-api.js` | The single organization adapter: people, departments, locations, tree, relationship types, relationships, graph, map and history. Keeps a monotonic epoch, `AbortController` and per-resource errors. | `window.AssetOrganization.{data,computed,methods,map*,canonical*}` |
+| `OrganizationRelations` (`relations-views.js`) | An asset's relationship panel: directed list with forward/inverse label, create/edit/delete and host change. | props `asset`, `app`; uses `organization.relations`, `organization.types`, `organization.dialogs.*` |
+| `OrganizationRelationTypes` (`relations-views.js`) | Configuration of the type vocabulary (immutable key, labels, containment, active). | permission `config.general`; routes `/relationship-types` |
+| `GraphExplorer` | Reuses the existing engine and design over a proxy source bounded by the server. | `serverGraphMode`, `organizationGraphSource`, `organization.graph` |
+| `MapExplorer` + `FloorLogic` | Reuses the existing floor-plan canvas; converts canvas pixels to relative 0..1 coordinates and persists positions. | `serverMapMode`, `organizationMapSource`, `saveOrganizationPosition` |
+| `AssetEditor` | Replaces person/site/location selectors with the canonical UUIDs the inventory adapter already uses. | `assetSiteLocations`, `assetActivePeople`, `app.sites` |
+| People page | List, record, history, assign/return/transfer with reason, notes and effective date. | `/people`, `/people/{id}`, `/people/{id}/assets`, `/people/{id}/history`, `/assets/{id}/assign|return|transfer` |
 
-## Contratos REST usados (sin rutas inventadas)
+## REST contracts used
 
-- Directorio: `GET|POST /departments`, `GET|PATCH /departments/{id}`,
+- Directory: `GET|POST /departments`, `GET|PATCH /departments/{id}`,
   `GET|POST /people`, `GET|PATCH /people/{id}`, `GET|POST /locations`,
   `GET /locations/tree?rootId&depth&maxNodes`, `GET|PATCH /locations/{id}`,
-  historiales `GET /{entidad}s/{id}/history`.
-- Ciclo de vida: `GET /people/{person}/assets`,
+  histories `GET /{entidad}s/{id}/history`.
+- Lifecycle: `GET /people/{person}/assets`,
   `POST /assets/{id}/assign`, `POST /assets/{id}/return`,
-  `POST /assets/{id}/transfer`, `PATCH /assets/{id}` (posición canónica).
-- Relaciones: `GET|POST /relationship-types`, `PATCH /relationship-types/{key}`,
+  `POST /assets/{id}/transfer`, `PATCH /assets/{id}` (canonical position).
+- Relationships: `GET|POST /relationship-types`, `PATCH /relationship-types/{key}`,
   `GET|POST /relationships`, `PATCH|DELETE /relationships/{id}`,
   `POST /relationships/host-move`, `GET /infrastructure/graph`.
-- Mapa: `GET /map?siteId&limit&offset`. El payload es
-  `{sites, positions, limit, offset, truncated}`; cada posición trae los ids
-  canónicos del activo y `x`/`y` como decimales 0..1, no `positionX`/
-  `positionY` ni una lista `items`.
+- Map: `GET /map?siteId&limit&offset`. The payload is
+  `{sites, positions, limit, offset, truncated}`; each position carries the
+  asset's canonical ids and `x`/`y` as 0..1 decimals, not `positionX`/
+  `positionY` or an `items` list.
 
-Cada lectura valida una época monotónica; cada escritura vuelve a comprobar el
-permiso efectivo del servidor antes de enviar. Un 401 limpia todo el estado de
-organización y aborta las peticiones en vuelo. El dominio del servidor nunca
-escribe en `localStorage`.
+Every read validates a monotonic epoch; every write rechecks the server's
+effective permission before sending. A 401 clears all organization state and
+aborts in-flight requests. The server domain never writes to `localStorage`.
 
-## Permisos
+## Permissions
 
 `people.view`, `people.create`, `people.edit`, `config.departments`,
 `config.sites`, `assets.view`, `assets.edit`, `assets.assign`,
-`config.general`. Una capacidad ausente produce un mensaje factual y, cuando
-corresponde, una vista de solo lectura; nunca se rellena con datos de
-demostración. `config.departments` sin `assets.edit` administra el directorio
-sin habilitar la edición de activos.
+`config.general`. A missing capability produces a factual message and, where
+appropriate, a read-only view; it is never filled with demo data.
+`config.departments` without `assets.edit` manages the directory without
+enabling asset editing.
 
-Los grupos de redundancia que aparecen en la ficha y en el grafo tienen su propio
-contrato en `docs/frontend/redundancy.md`: se leen con `assets.view`, se escriben con
-`assets.edit` y no conceden capacidades nuevas de organización.
+Redundancy groups shown on the asset record and in the graph have their own
+contract in [Redundancy groups](redundancy.md): they are read with `assets.view`,
+written with `assets.edit`, and grant no new organization capabilities.
 
-## Coordenadas y planos
+## Coordinates and floor plans
 
-El servidor expone `positionX`/`positionY` como cadenas decimales en 0..1. El
-canvas conserva su espacio de píxeles y convierte con los límites reales del
-plano (`organizationPlanBounds`). Una posición sólo se envía cuando el activo
-tiene ubicación; `planRef`/`planPage` son metadatos, nunca un archivo o una URL
-de plano. El dibujo de planos existente sigue siendo ilustrativo.
+The server exposes `positionX`/`positionY` as decimal strings in 0..1. The
+canvas keeps its pixel space and converts using the plan's real bounds
+(`organizationPlanBounds`). A position is only sent when the asset has a
+location; `planRef`/`planPage` are metadata, never a file or a plan URL. The
+existing floor-plan drawing remains illustrative.
 
-## Cambio de host en la interfaz
+## Changing the host
 
-`OrganizationRelations` conserva la acción «Cambiar host» únicamente en el hijo
-de una relación `hosted_in` y abre un diálogo `modal-shell` con controles Vue
-reales: el activo que cambia de host (su nombre canónico o, si el panel no lo
-conoce, su UUID), la búsqueda de destino `#server-host-search`, la lista de hosts
-de la página acotada del servidor, el motivo `#server-host-reason`, las notas
-`#server-host-notes` y la fecha efectiva `#server-host-effective`. Confirmar
-llama al `confirmOrganizationHostMove` existente; cerrar, `Escape` y el botón de
-cancelar usan `closeOrganizationHostMove`. `modal-shell` mantiene el foco, lo
-devuelve al disparador y bloquea el desplazamiento del documento.
+`OrganizationRelations` offers **Change host** only on the child of a
+`hosted_in` relationship and opens a `modal-shell` dialog with real Vue
+controls: the asset changing host (its canonical name or, if the panel does not
+know it, its UUID), the target search `#server-host-search`, the list of hosts
+from the server's bounded page, the reason `#server-host-reason`, the notes
+`#server-host-notes` and the effective date `#server-host-effective`. Confirming
+calls the existing `confirmOrganizationHostMove`; closing, `Escape` and the
+cancel button use `closeOrganizationHostMove`. `modal-shell` keeps focus,
+returns it to the trigger and locks document scrolling.
 
-- El hijo se toma siempre del origen de la arista (`from`), se vea la relación
-  como saliente o entrante; la dirección sólo cambia las etiquetas.
-- El destino es la página acotada `GET /assets/search?limit=50&offset=0` del
-  servidor. La interfaz no filtra ni valida por su cuenta: el servidor decide si
-  un host es válido y su rechazo queda en el diálogo. Un mismo host, el propio
-  activo o el host actual no se rechazan en el cliente.
-- El motivo mínimo de cuatro caracteres del servidor se comprueba antes de
-  enviar, para no producir un 422 previsible. Las notas y la fecha efectiva son
-  opcionales; la fecha se convierte con `organizationEffectiveIso` y conserva la
-  zona horaria del navegador.
-- La petición es `POST /relationships/host-move` con `{childId, newHostId,
-  reason, notes?, effectiveAt?}`. No incluye argumentos de autoridad ni llama a
-  hipervisores, Docker o migraciones: sólo registra inventario y relaciones.
-- Tras el éxito se recargan las relaciones desde el servidor, el grafo si estaba
-  cargado y, cuando el activo afectado está abierto en su ficha, el detalle y el
-  historial estructurado. Cada refresco revalida la marca de sesión, así que un
-  cierre de sesión en curso no revive filas, diálogos ni avisos.
-- Un rechazo del servidor mantiene el diálogo abierto, deja el mensaje en el
-  cuerpo y no modifica la relación existente en pantalla.
+- The child is always taken from the edge's origin (`from`), whether the
+  relationship is seen as outgoing or incoming; direction only changes labels.
+- The target is the server's bounded page `GET /assets/search?limit=50&offset=0`.
+  The interface neither filters nor validates on its own: the server decides
+  whether a host is valid and its rejection stays in the dialog. The same host,
+  the asset itself or the current host are not rejected on the client.
+- The server's minimum four-character reason is checked before sending, to
+  avoid a predictable 422. Notes and effective date are optional; the date is
+  converted with `organizationEffectiveIso` and keeps the browser time zone.
+- The request is `POST /relationships/host-move` with `{childId, newHostId,
+  reason, notes?, effectiveAt?}`. It includes no authority arguments and calls
+  no hypervisors, Docker or migrations: it only records inventory and
+  relationships.
+- After success the relationships reload from the server, the graph reloads if
+  it was loaded, and, when the affected asset is open on its record, so do the
+  detail and structured history. Each refresh revalidates the session mark, so
+  a sign-out in progress does not revive rows, dialogs or notices.
+- A server rejection keeps the dialog open, leaves the message in its body and
+  does not change the relationship on screen.
 
-## Límites conocidos
+## Known limits
 
-- En sesión autenticada los dominios de organización sólo leen la API. Carga,
-  error y falta de permiso no autorizan respaldo demo ni persistencia local del
-  dominio. Las preferencias visuales del mapa siguen siendo estado local.
-- Las posiciones requieren ubicación y coordenadas relativas emparejadas. Los
-  planos siguen siendo representaciones ilustrativas con `planRef`/`planPage`;
-  no hay almacenamiento de archivos, geocodificación ni descubrimiento.
-- Un grafo truncado puede omitir extremos de relaciones; la UI no inventa nodos.
-  Una ubicación sin su cadena ancestral cargada no se inventa en la búsqueda.
-- La prueba integrada usa SQLite. No certifica motores externos, proveedores de
-  modelos, integración con hipervisores ni producción.
+- In an authenticated session the organization domains read only from the API.
+  Loading, errors and missing permissions never authorize a demo fallback or
+  local persistence of the domain. Visual map preferences remain local state.
+- Positions require a location and paired relative coordinates. Floor plans
+  remain illustrative representations with `planRef`/`planPage`; there is no
+  file storage, geocoding or discovery.
+- A truncated graph may omit relationship endpoints; the UI does not invent
+  nodes. A location whose ancestor chain is not loaded is not invented in search.
+- The integrated test uses SQLite. It does not certify external engines, model
+  providers, hypervisor integration or production.

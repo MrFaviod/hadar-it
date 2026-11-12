@@ -98,8 +98,7 @@ de una sola ejecución con etiquetas distintas contra volúmenes vivos.
 
 Después de la instalación y de una migración tardía, ejecuta una tarea autenticada real y
 verifica su resultado completado. El readiness por sí solo no prueba que el worker pueda
-acceder al almacenamiento compartido de la cola. Consulta el informe de la fase 11 para la
-evidencia de ida y vuelta con volúmenes nuevos y entre consumidores.
+acceder al almacenamiento compartido de la cola.
 
 ### Primero la base de datos integrada
 
@@ -473,7 +472,7 @@ Suministra `ITSM_AGENT_MODEL` y la credencial del proveedor elegido a través de
 y luego recrea el backend de forma intencional. Sin un modelo configurado, `/api/v1/agent/chat`
 devuelve un 503 veraz, no un éxito conversacional falso. Listado, detalle, CRUD y búsqueda siguen
 siendo utilizables. Las operaciones simples son directas; el worker Huey no es obligatorio para
-cada llamada de herramienta. Esta fase no agrega shell, SQL en bruto, obtención arbitraria de URL
+cada llamada de herramienta. El agente no recibe shell, SQL en bruto, obtención arbitraria de URL
 ni herramientas del sistema operativo.
 
 
@@ -560,9 +559,9 @@ Referencia de Docker: [Compose networking and host gateway](https://docs.docker.
 
 ### Preparación de recordatorios de mantenimiento
 
-La fase 7 agrega planes preventivos persistidos, intervenciones e incidentes técnicos. Aplica las
+Mantenimiento agrega planes preventivos persistidos, intervenciones e incidentes técnicos. Aplica las
 migraciones explícitamente antes de iniciar API y worker. Las pantallas originales de
-mantenimiento en Vue usan estas APIs. La fase 8 vincula eventos de monitorización con incidentes,
+mantenimiento en Vue usan estas APIs. La monitorización vincula sus eventos con incidentes,
 pero el acuse, la recuperación y el cierre siguen siendo distintos: el acuse nunca resuelve, la
 recuperación nunca cierra un incidente automáticamente, y el cierre sigue siendo una decisión
 humana explícita con una sugerencia de cierre asistido.
@@ -577,7 +576,7 @@ adicional.
 
 Observa el evento estructurado del worker `maintenance.reminders_prepared` y sus contadores
 `created` y `scanned`. La preparación nunca completa un plan, resuelve un incidente ni envía
-correo o Telegram. La entrega es propiedad del servicio de notificaciones de la fase 8 descrito
+correo o Telegram. La entrega es propiedad del servicio de notificaciones descrito
 arriba; el barrido de mantenimiento solo prepara filas durables de recordatorio. Consulta
 `docs/backend/maintenance.md`, `docs/backend/interventions.md` y `docs/backend/agent-tools.md`
 para los contratos de operación y permisos.
@@ -597,16 +596,16 @@ automático, orquestador, pipeline de release ni microservicios de negocio.
 ## Respaldos y recuperación
 
 - PostgreSQL: ejecuta `pg_dump -Fc` con tus credenciales aprobadas hacia un destino protegido. Verifica `pg_restore --list` y luego ensaya la restauración en una base nueva y ejecuta migraciones y readiness. Los respaldos de bases de datos externas pertenecen al operador externo; los volúmenes locales de Docker no son respaldos.
-- MariaDB: usa `mariadb-dump --single-transaction` para tablas transaccionales con credenciales externas aprobadas y luego importa en una base nueva con `mariadb`. Coordina los cambios de esquema y las subidas de archivos con la instantánea SQL. Ejecuta migraciones, readiness y comprobaciones autenticadas después de restaurar. La fase 11 ensayó la restauración nativa de PostgreSQL y MariaDB en bases desechables separadas.
+- MariaDB: usa `mariadb-dump --single-transaction` para tablas transaccionales con credenciales externas aprobadas y luego importa en una base nueva con `mariadb`. Coordina los cambios de esquema y las subidas de archivos con la instantánea SQL. Ejecuta migraciones, readiness y comprobaciones autenticadas después de restaurar.
 - SQL Server: usa el procedimiento nativo de respaldo y restauración completa del operador de la base, incluidas las claves y certificados de cifrado donde estén configurados. Este entorno no ejecutó la instalación ni la restauración de SQL Server; no infieras compatibilidad desde la URL de SQLAlchemy ni desde los resultados de otro motor.
 - Base principal SQLite: usa la API de respaldo en línea de SQLite o `.backup`, no una copia informal de una base WAL viva. Para un respaldo de archivo en frío, detén primero la API y el worker propios e incluye un estado consistente de base y WAL.
-- Huey SQLite: pausa el encolado de la API y el worker de este workspace, respalda todo el volumen de la cola de forma consistente; restaurarlo puede repetir trabajos. Los trabajos de la fase 6 usan recibos durables por fila en el SQL principal para evitar repetir filas exitosas. No restaures el estado de la cola de forma independiente de los datos de negocio relacionados sin considerar efectos duplicados.
+- Huey SQLite: pausa el encolado de la API y el worker de este workspace, respalda todo el volumen de la cola de forma consistente; restaurarlo puede repetir trabajos. Los trabajos de importación usan recibos durables por fila en el SQL principal para evitar repetir filas exitosas. No restaures el estado de la cola de forma independiente de los datos de negocio relacionados sin considerar efectos duplicados.
 - Adjuntos: respalda `attachment-data` junto con una instantánea consistente del SQL principal. SQL guarda metadatos y claves opacas de blobs, no los bytes de los archivos. Restaurar solo SQL o solo el volumen queda incompleto. Coordina subidas y bajas durante el respaldo y ensaya descargas autenticadas después de restaurar en estado aislado. No borres blobs desconocidos como operación de limpieza improvisada; las escrituras interrumpidas pueden dejar objetos sin referencia que requieren una reconciliación autorizada de forma explícita.
 - Redis opcional: persiste AOF y respalda de forma consistente usando los procedimientos de Redis. Prometheus: respalda en frío su volumen propio `prometheus-data` (detén el servicio o toma una instantánea del sistema de archivos) o usa su procedimiento admitido de TSDB; la retención no es un respaldo. El estado de Alertmanager (silencios y log de notificaciones) vive en `alertmanager-data`; respáldalo por separado. El outbox de notificaciones, la bandeja y el historial de entrega viven en el SQL principal y siguen el procedimiento de respaldo SQL. Restaurar métricas o el estado de Alertmanager es independiente de la disponibilidad del inventario.
 - Respalda por separado los repositorios raíz, frontend y backend, los ajustes externos y los volúmenes nombrados. Nunca confirmes en Git archivos de respaldo ni secretos.
 - Los presets de apariencia, los metadatos de logotipo, la apariencia publicada y los ajustes de integración están en el SQL principal; los bytes de logotipos y documentos están en el almacén opaco de adjuntos. Restaura ambos de forma consistente. Reaplica los orígenes y URLs base externos, la política de cookies, las credenciales de proveedores, las credenciales de cliente, las referencias y tokens de notificación y las credenciales de motores a través del mecanismo aprobado de secretos. Los archivos y el SQL no recuperan automáticamente secretos gestionados externamente. No los rotes ni los divulgues durante un ensayo.
 - Meilisearch es estado derivado: después de restaurar SQL, archivos y la autorización vigente, solicita la reconstrucción de búsqueda protegida y observa su resultado terminal. El intercambio de índices temporales preserva el índice anterior en caso de fallo; el respaldo de SQL sigue siendo utilizable. Su volumen es opcional para la recuperación, no el respaldo canónico del inventario.
-- Ensaya la recuperación en un proyecto Compose y volúmenes nuevos y aislados antes de reemplazar producción. Esta fase no realiza ningún respaldo ni restauración contra servicios existentes del servidor.
+- Ensaya la recuperación en un proyecto Compose y volúmenes nuevos y aislados antes de reemplazar producción. Estas instrucciones no ejecutan respaldos ni restauraciones contra servicios existentes del servidor.
 
 ## Comprobaciones e inspección
 

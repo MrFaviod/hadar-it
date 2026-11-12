@@ -61,7 +61,7 @@ a truncated or duplicated code.
   written; numeric repeats receive distinct advanced suffixes.
 - When the category is not in the catalog (legacy free-text asset), no code is
   invented: the existing value is kept on category/site edits, and a create
-  without a code falls back to the phase 3 random `A-<8 hex>` value.
+  without a code falls back to the original random `A-<8 hex>` value.
 
 ## Atomicity, locking and counters
 
@@ -107,7 +107,7 @@ concurrency run is part of this task.
   disabled or disassociated are kept unchanged instead of being erased, so
   catalog evolution does not destroy asset data.
 - `cost` keeps its bounded two-decimal string representation. Images, archive,
-  retire and history behavior are the contracts in `docs/backend/asset-core.md`; this
+  retire and history behavior are the contracts in [Asset core: common fields, lifecycle, history and media](asset-core.md); this
   task only routes them through the same serialized write path.
 - Mutation of configuration stays in `InventoryCatalog.put`; asset writes never
   mutate catalog metadata.

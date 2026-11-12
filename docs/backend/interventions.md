@@ -1,6 +1,6 @@
 # Technical interventions and incidents
 
-Phase 7 keeps technical work as first-class, queryable records beside the asset
+Technical work is kept as first-class, queryable records beside the asset
 sheet. Every write goes through `InterventionService`, so the HTTP adapter,
 future agent tools and machine credentials share one authorization and
 validation path. Assets, directory people and attachments remain owned by their

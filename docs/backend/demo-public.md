@@ -4,7 +4,7 @@
 logs in with the published credentials `admin` / `admin` and receives a *demo
 administrator*: real business capability, no control over the installation.
 This document states exactly what that account can do, what the backend refuses,
-and which limits protect the shared state. See `docs/backend/release-modes.md` for the
+and which limits protect the shared state. See [Release modes: `dev`, `prod`, `demo`](release-modes.md) for the
 mode matrix itself.
 
 Enforcement is backend-side. The UI may hide an action, but a hidden button is

@@ -1,12 +1,13 @@
-# durable installation appearance
+# Installation appearance
 
-Backend contract for installation appearance and portable branding packages.\nThe appearance editor uses this module as its canonical, durable backend.
+Backend contract for installation appearance and portable branding packages.
+The appearance editor uses this module as its canonical, durable backend.
 
 ## Preset document
 
 The preset schema is unchanged from the original engine. It is installation
-data, not per-user data. `themeMode` stays a per-user workspace preference
-(C1); the preset only stores its default.
+data, not per-user data. `themeMode` stays a per-user workspace preference;
+the preset only stores its default.
 
 ```json
 {

@@ -1,6 +1,6 @@
 # Inventory catalog and form configuration
 
-Phase 4 supplies persisted installation metadata. The shared inventory service
+The inventory catalog supplies persisted installation metadata. The shared inventory service
 uses it for typed fields, status transitions and configurable code allocation;
 the Vue adapter consumes the same public configuration.
 `InventoryCatalog` owns configuration authorization and validation. REST and

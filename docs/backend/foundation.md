@@ -1,8 +1,9 @@
-# Foundation design and validation status
+# Backend foundation
 
-Phase 1 backend infrastructure. This document records what is implemented,
-what is validated and what remains pending; it is not a roadmap for business
-features.
+The infrastructure every backend module builds on: package layout, database
+access, task execution, optional services and the Docker deployment contract.
+It records what is implemented, what is validated and what remains pending; it
+is not a roadmap for business features.
 
 ## Package layout
 
@@ -90,7 +91,7 @@ supported.
 Redis is implemented as an optional Huey queue backend and validated live.
 Optional SQL/task drivers and service profiles remain explicit choices rather than
 mandatory infrastructure. Device monitoring and notifications use their implemented
-internal adapters; Pydantic AI and FastMCP reuse canonical authorized services. Phase 9
+internal adapters; Pydantic AI and FastMCP reuse canonical authorized services. Reporting
 adds WeasyPrint PDF rendering, Segno QR codes and existing openpyxl Excel generation in
 the API/worker image, with native Pango/HarfBuzz libraries and DejaVu fonts. Generated
 documents share opaque blob storage with attachments, not public static files. Advanced

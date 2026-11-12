@@ -1,159 +1,103 @@
-# Motores de agente e integraciones (frontend)
+# Agent engines and integrations (frontend)
 
-El chat usa una interfaz común para los motores Pydantic AI, Hermes y OpenCode. El navegador solo transporta mensajes, contexto acotado, selección de motor/modelo y el identificador de un activo permanente. Las URL de proveedor, los tokens y la autorización de sesión permanecen en el servidor.
+The conversation view uses one interface for the Pydantic AI, Hermes and OpenCode engines. The browser only carries messages, bounded context, the engine and model selection, and the identifier of a persisted asset. Provider URLs, tokens and session authorization stay on the server.
 
-## Rutas
+This guide covers the conversation routes, the streaming transport, the **Settings → AI** screens, the daily AI quota views and their limits.
 
-- `#/conversacion`: chat. Carga motores con `GET /api/v1/agent/engines`; si el endpoint aditivo no existe (`404`), mantiene el chat compatible `POST /api/v1/agent/chat`. Cada fallo de descubrimiento se muestra con la instancia y el mensaje público del servidor; una instancia sin modelos no reemplaza la selección guardada.
-- `#/configuracion/ia`: preferencia del chat y, para administradores, instancias, catálogo, instalaciones y el asistente de integración. La ruta se resuelve con `window.AssetAgentViews.routeOverride` sin bifurcar el enrutador principal.
-- `#/configuracion/ia` requiere `assets.view`: la preferencia de chat y modelo sigue disponible para cualquier usuario autenticado. La administración de instancias, catálogo, instalaciones y el asistente requiere `system.providers`, y cambiar un módulo requiere además `system.modules`. La UI no concede permisos ni los infiere: muestra el error del servidor.
+## Routes
 
-## Transporte
+- `#/conversacion`: the conversation. Engines load from `GET /api/v1/agent/engines`; when that additive endpoint does not exist (`404`), the compatible `POST /api/v1/agent/chat` conversation is kept. Every discovery failure is shown with the instance and the server's public message; an instance without models does not replace the saved selection.
+- `#/configuracion/ia`: the conversation preference and, for administrators, instances, catalog, installations and the integration wizard. The route resolves through `window.AssetAgentViews.routeOverride` without forking the main router.
+- `#/configuracion/ia` requires `assets.view`: the conversation and model preference stays available to any authenticated user. Managing instances, catalog, installations and the wizard requires `system.providers`, and changing a module also requires `system.modules`. The UI neither grants nor infers permissions: it shows the server's error.
 
-Todas las llamadas usan `window.AssetAccess.request`/`stream` con la sesión same-origin y el token CSRF. No se usa `EventSource` porque el envío es un `POST` con cuerpo y señal de cancelación.
+## Transport
+
+Every call uses `window.AssetAccess.request`/`stream` with the same-origin session and the CSRF token. `EventSource` is not used because sending is a `POST` with a body and a cancellation signal.
 
 - `PUT /api/v1/agent/preferences` `{instanceId, model}`.
 - `POST /api/v1/agent/sessions` `{instanceId, model, context?, assetId?}`.
-- `POST /api/v1/agent/sessions/{id}/messages` `{message, assetId?}`: respuesta `text/event-stream`.
-- `PATCH /api/v1/agent/sessions/{id}` `{model}` o `{instanceId, model}`: el servidor reautoriza la instancia destino, rechaza el cambio mientras la sesión está en ejecución y conserva el identificador y la transcripción de la conversación.
-- `GET /api/v1/agent/sessions/{id}`: instantánea para reconexión.
-- `POST /api/v1/agent/sessions/{id}/cancel`: sin cuerpo.
+- `POST /api/v1/agent/sessions/{id}/messages` `{message, assetId?}`: `text/event-stream` response.
+- `PATCH /api/v1/agent/sessions/{id}` `{model}` or `{instanceId, model}`: the server re-authorizes the target instance, rejects the change while the session is running, and keeps the conversation identifier and transcript.
+- `GET /api/v1/agent/sessions/{id}`: snapshot for reconnection.
+- `POST /api/v1/agent/sessions/{id}/cancel`: no body.
 
-Los eventos SSE usan `data: {json}` terminado en una línea vacía. `delta.text` es **un fragmento nuevo que se concatena**; el adaptador del servidor compara las respuestas acumuladas del proveedor antes de emitir, de modo que una repetición acumulada no duplica texto. Los tipos soportados son `session`, `delta`, `tool`, `usage`, `error` y `done`. En `done` se conservan `actions`, `results` y `approvalPending` además de `cancelled`, por lo que las tarjetas existentes se siguen mostrando.
+SSE events use `data: {json}` terminated by an empty line. `delta.text` is **a new fragment to append**; the server adapter compares the provider's accumulated responses before emitting, so a repeated accumulated response does not duplicate text. Supported types are `session`, `delta`, `tool`, `usage`, `error` and `done`. `done` keeps `actions`, `results` and `approvalPending` besides `cancelled`, so the existing cards still render.
 
-El cliente:
+The client:
 
-- Acumula fragmentos sin interpretar HTML; el texto se interpola, nunca se renderiza como marcado.
-- Muestra herramientas, consumo de la última llamada (`precision: measured|estimated|unavailable`) y errores del motor sin inventar una respuesta.
-- Envía como contexto solo el historial reciente (máximo 20 turnos) y un `assetId` UUID elegido entre activos ya devueltos por el servidor para esta sesión.
-- Al cambiar de motor o de perfil aplica `PATCH` a la **misma** sesión ITSM: conserva mensajes, borrador e identificador y solo reinicia la sesión nativa del motor; nunca inicia otra conversación ni reenvía historial. Al cambiar de modelo sin cambiar de instancia aplica el mismo `PATCH`.
-- «Motor» muestra un único valor por motor externo y «Perfil» sus perfiles autorizados; el selector de perfil solo aparece cuando el servidor anuncia más de uno. Las opciones y etiquetas salen de las instancias descubiertas (nombre o perfil), nunca de endpoints, directorios ni credenciales. Cada proveedor Pydantic, global o personal, conserva su propia opción de motor. Si el `PATCH` falla, la selección vuelve al valor que confirma el servidor.
-- Muestra «Cancelar» durante todo el procesamiento, incluso mientras se crea la sesión; después de creada llama al endpoint de cancelación. Si el motor no permite interrumpir, muestra el motivo del servidor.
-- Tras un corte no reenvía el mensaje automáticamente. Ofrece «Reconectar y consultar el estado», que reemplaza la transcripción con la instantánea del servidor; no duplica texto, acciones ni consumo.
+- Accumulates fragments without interpreting HTML; text is interpolated, never rendered as markup.
+- Shows tools, usage of the last call (`precision: measured|estimated|unavailable`) and engine errors without inventing an answer.
+- Sends as context only the recent history (at most 20 turns) and an `assetId` UUID chosen among assets the server has already returned in this session.
+- When the engine or profile changes, applies `PATCH` to the **same** ITSM session: messages, draft and identifier are kept and only the engine's native session restarts; it never starts another conversation or resends history. Changing the model without changing the instance applies the same `PATCH`.
+- **Engine** shows one value per external engine and **Profile** its authorized profiles; the profile selector appears only when the server announces more than one. Options and labels come from discovered instances (name or profile), never from endpoints, directories or credentials. Each Pydantic provider, global or personal, keeps its own engine option. If the `PATCH` fails, the selection returns to the value the server confirms.
+- Shows **Cancel** during the whole processing, including while the session is being created; once created it calls the cancellation endpoint. If the engine cannot be interrupted, it shows the server's reason.
+- After a dropped connection it does not resend the message automatically. It offers **Reconnect and check status**, which replaces the transcript with the server snapshot; text, actions and usage are not duplicated.
 
-La preferencia guardada se corrige si la instancia o el modelo ya no existen. La lista de modelos siempre proviene de la instancia conectada; no hay catálogo de modelos gratuitos en el cliente. Si el DTO del motor no declara un presupuesto estricto, la UI no lo presenta como tal.
+The saved preference is corrected when the instance or model no longer exists. The model list always comes from the connected instance; the client has no catalog of free models. If the engine DTO does not declare a strict budget, the UI does not present one.
 
-El evento `usage` conserva por separado `precision` y `source`
-(`provider|engine|estimate|none`). **Última llamada** muestra entrada, salida,
-caché leída/escrita, razonamiento y total recibidos, sin sumarlos en el navegador
-ni presentarlos como el total de la ejecución. Los componentes ausentes o `null`
-se muestran como no disponibles; un cero explícito se mantiene como cero. Los
-indicadores `inputIncludesCache` y `outputIncludesReasoning` aclaran si esos
-componentes ya forman parte de entrada y salida, evitando contarlos dos veces.
-`totalSource` distingue el total del proveedor del derivado por el servidor;
-`estimationMethod` muestra el método comunicado cuando hay una estimación.
-La cuota diaria y los reportes siguen siendo la autoridad sobre el consumo
-acumulado, no este último evento del flujo.
+The `usage` event keeps `precision` and `source` (`provider|engine|estimate|none`) separate. **Last call** shows the input, output, cache read/write, reasoning and total values received, without summing them in the browser or presenting them as the total for the run. Missing or `null` components are shown as unavailable; an explicit zero stays zero. The `inputIncludesCache` and `outputIncludesReasoning` flags state whether those components are already part of input and output, so they are not counted twice. `totalSource` distinguishes the provider's total from one derived by the server; `estimationMethod` shows the reported method when there is an estimate. The daily quota and reports remain the authority for accumulated usage, not this last stream event.
 
-## Configuración → IA
+## Settings → AI
 
-- `GET /api/v1/agent/integrations` devuelve instancias, instalaciones con `target:{engine,path,profile,version,remote}`, estado de verificación, enlaces y valores predeterminados. La UI consume esa forma canónica; `verified` solo se toma del servidor.
-- `GET /api/v1/agent/integrations/catalog` devuelve skills y módulos. La clasificación oficial sale de `module.official === true` y del `module` declarado por cada skill: el módulo canónico es `itsm`. La sección «Paquete oficial» agrupa esas skills; «Módulos» muestra solo los módulos externos y el módulo oficial no expone una acción de deshabilitación. Solo los módulos habilitados ofrecen sus skills.
-- `POST/PUT /api/v1/agent/integrations/instances` envía `{name,engine,baseUrl,secretRef,username?,profile?,directory?,defaultModel?,integrationIdentityId?,enabled}`. Solo viaja el **nombre** de la referencia al secreto, nunca su valor. Si el servidor rechaza la configuración, la UI muestra el mensaje seguro y los campos informados por el servidor (por ejemplo, una referencia de secreto no configurada), sin incluir valores de secretos.
-- `PUT /api/v1/agent/integrations/modules/{id}` `{enabled}`. Requiere `system.modules`; el módulo oficial no se deshabilita (`409`).
-- `POST /api/v1/agent/integrations/targets` `{engine,path,profile?,version?}`: ruta absoluta explícita; el servidor no escanea el home. La respuesta canónica es `{target:{engine,path,profile,version,remote},detection:{engine,format,version,profile,targetPath,configFile,configExists,skillsDirectory,limitations}}`. El asistente solo acepta ese sobre completo: exige motor coincidente, rutas absolutas, versión/formato, archivo y directorio de skills, booleano `configExists` y limitaciones de texto. `configExists:false` es un destino válido cuya configuración se creará. Un `200` sin esos campos se muestra como error y nunca se convierte en un destino instalable inventando `detected:true`.
-- `POST /api/v1/agent/integrations/install` con `{instanceId,target:{engine,path,profile?,version?,remote?},mcp:{url,secretRef,identityId},skills,operation:"install"}`. Para un destino remoto se envía además `mode:"remote"`; ese campo, y no `target.remote`, determina el flujo en el servidor. El `profile` de un OpenCode nunca se teclea en el asistente: se reutiliza el registrado en la instancia (`null` si no declara ninguno) y el de Hermes sigue siendo editable. La respuesta es el DTO canónico de instalación (`id,instanceId,target,skills,mcp,status,verified,mcpVerified,profileSafetyVerified,checks,conflicts,binding,requestDigest,operation,managedFiles,createdAt,updatedAt`, más `request` cuando aplica y `error:{code,message}`/`limitations` cuando el servidor sanea un fallo); la UI la conserva tal cual, muestra ese mensaje y esas limitaciones en lugar de una frase genérica cuando existen, mantiene la frase genérica cuando no hay `error`, lee la versión de `target.version` y nunca infiere `verified`. Una instalación remota devuelve `status:"exported"`, `verified:false`, `request` y `requestDigest`.
-- La inspección local pertenece a un destino concreto: el asistente guarda una instantánea de `engine`, `path`, `profile` (normalizado como en la petición), `version` y `remote`. Instalar en local exige que esa instantánea siga coincidiendo con el destino actual y que proceda de `POST /targets`, no de un `detection` asignado a mano. Cambiar cualquiera de esos campos invalida la inspección y obliga a repetirla; `canNext` del paso 2 aplica la misma regla. Cada inspección lleva un contador de generación: una respuesta que llega tarde se descarta sin fijar `detection`, `version` ni un error de sobre válido, y no puede habilitar una instalación posterior. Un destino remoto sigue exportando la solicitud sin inspección local; volver a local exige una inspección nueva.
-- Las operaciones de ciclo de vida (`verify`, `update`, `repair`, `disable`, `uninstall`) envían solo `{instanceId,target,operation}`: el servidor resuelve el enlace guardado y el secreto; la UI no reenvía tokens ni skills.
-- `GET /api/v1/agent/integrations/installations/{id}/request` recupera la solicitud remota.
-- `POST /api/v1/agent/integrations/receipts` `{instanceId,requestDigest,receipt}` importa el recibo emitido en el host remoto. El servidor rechaza un resumen que no coincida y solo devuelve `verified: true` tras validar el recibo y comprobar de forma independiente MCP y seguridad del perfil.
+- `GET /api/v1/agent/integrations` returns instances, installations with `target:{engine,path,profile,version,remote}`, verification status, bindings and defaults. The UI consumes that canonical shape; `verified` is only taken from the server.
+- `GET /api/v1/agent/integrations/catalog` returns skills and modules. The official classification comes from `module.official === true` and from the `module` each skill declares: the canonical module is `itsm`. The **Official package** section groups those skills; **Modules** shows only external modules, and the official module offers no disable action. Only enabled modules offer their skills.
+- `POST/PUT /api/v1/agent/integrations/instances` sends `{name,engine,baseUrl,secretRef,username?,profile?,directory?,defaultModel?,integrationIdentityId?,enabled}`. Only the **name** of the secret reference travels, never its value. If the server rejects the configuration, the UI shows the safe message and the fields the server reports (for example, an unconfigured secret reference), without secret values.
+- `PUT /api/v1/agent/integrations/modules/{id}` `{enabled}`. Requires `system.modules`; the official module cannot be disabled (`409`).
+- `POST /api/v1/agent/integrations/targets` `{engine,path,profile?,version?}`: an explicit absolute path; the server does not scan the home directory. The canonical response is `{target:{engine,path,profile,version,remote},detection:{engine,format,version,profile,targetPath,configFile,configExists,skillsDirectory,limitations}}`. The wizard only accepts that complete envelope: it requires a matching engine, absolute paths, version/format, config file and skills directory, a boolean `configExists` and text limitations. `configExists:false` is a valid target whose configuration will be created. A `200` without those fields is shown as an error and is never turned into an installable target by inventing `detected:true`.
+- `POST /api/v1/agent/integrations/install` with `{instanceId,target:{engine,path,profile?,version?,remote?},mcp:{url,secretRef,identityId},skills,operation:"install"}`. A remote target also sends `mode:"remote"`; that field, not `target.remote`, selects the flow on the server. An OpenCode `profile` is never typed in the wizard: the one registered on the instance is reused (`null` if it declares none), while the Hermes profile stays editable. The response is the canonical installation DTO (`id,instanceId,target,skills,mcp,status,verified,mcpVerified,profileSafetyVerified,checks,conflicts,binding,requestDigest,operation,managedFiles,createdAt,updatedAt`, plus `request` when applicable and `error:{code,message}`/`limitations` when the server sanitizes a failure). The UI keeps it as is, shows that message and those limitations instead of a generic sentence when they exist, keeps the generic sentence when there is no `error`, reads the version from `target.version` and never infers `verified`. A remote installation returns `status:"exported"`, `verified:false`, `request` and `requestDigest`.
+- Local inspection belongs to one concrete target: the wizard stores a snapshot of `engine`, `path`, `profile` (normalized as in the request), `version` and `remote`. Installing locally requires that snapshot to still match the current target and to come from `POST /targets`, not from a hand-assigned `detection`. Changing any of those fields invalidates the inspection and requires repeating it; step 2's `canNext` applies the same rule. Each inspection carries a generation counter: a late response is discarded without setting `detection`, `version` or a valid-envelope error, and cannot enable a later installation. A remote target still exports the request without local inspection; switching back to local requires a new inspection.
+- Lifecycle operations (`verify`, `update`, `repair`, `disable`, `uninstall`) send only `{instanceId,target,operation}`: the server resolves the saved binding and secret; the UI does not resend tokens or skills.
+- `GET /api/v1/agent/integrations/installations/{id}/request` retrieves the remote request.
+- `POST /api/v1/agent/integrations/receipts` `{instanceId,requestDigest,receipt}` imports the receipt issued on the remote host. The server rejects a non-matching digest and only returns `verified: true` after validating the receipt and independently checking MCP and profile safety.
 
-El asistente de cinco pasos solo se abre automáticamente en el primer registro (sin instalaciones ni instancias externas). Permite instancia nueva o existente, perfil/entorno, comprobación real del destino, servidor MCP con identidad de máquina y selección explícita de skills. Una instalación remota genera una solicitud JSON y **no** afirma que el destino esté instalado: solo un recibo verificado por el servidor puede mostrar `verified: true`. El comando auxiliar es:
+The five-step wizard opens automatically only on first registration (no installations and no external instances). It supports a new or existing instance, profile/environment, a real check of the target, an MCP server with a machine identity, and explicit skill selection. A remote installation generates a JSON request and does **not** claim the target is installed: only a receipt verified by the server can show `verified: true`. The helper command is:
 
 ```bash
 python -m itsm.agent_integrations --request <ruta del archivo>
 ```
 
-Nunca se muestra «instalado» a partir de la solicitud, de la escritura de archivos o de un recibo sin verificación de conexión MCP.
+"Installed" is never shown on the strength of the request, of files being written, or of a receipt without MCP connection verification.
 
-## Seguridad y límites
+## Security and limits
 
-- El navegador no recibe tokens de motores, secretos MCP ni configuración de proveedores; no los guarda en almacenamiento local.
-- No hay URL de endpoint arbitraria en las peticiones del chat: el `instanceId` se resuelve en el servidor.
-- Los permisos efectivos son los de la identidad de integración; cambiar motor, modelo o skill no amplía privilegios.
-- La cuota diaria de tokens se presenta con la clasificación del servidor. El consumo de motores externos se muestra por separado porque puede no ser interrumpible antes de procesar.
-- Los errores del servidor se presentan con su mensaje público; no se exponen excepciones crudas del proveedor.
+- The browser receives no engine tokens, MCP secrets or provider configuration, and stores none of them in local storage.
+- Conversation requests carry no arbitrary endpoint URL: the `instanceId` is resolved on the server.
+- Effective permissions are those of the integration identity; changing engine, model or skill does not widen privileges.
+- The daily token quota is presented with the server's classification. External engine usage is shown separately because it may not be interruptible before processing.
+- Server errors are shown with their public message; raw provider exceptions are not exposed.
 
-## Pruebas enfocadas
+## Focused tests
 
-Desde `frontend/`:
+From `frontend/`:
 
 ```bash
 node --test tests/conversation.test.cjs tests/agent-integrations.test.cjs
 ```
 
-Cubren, entre otros: descubrimiento dinámico y corrección de un modelo desaparecido, streaming por fragmentos exactos, consumo clasificado, tarjetas de acciones/resultados, cambio de motor/modelo, cancelación, reconexión sin duplicar, presupuesto y su advertencia, ruta `#/configuracion/ia`, permisos, asistente, sobre canónico `{target,detection}` del destino y rechazo de un `200` incompleto, instalación exacta, DTO canónico en instalación y ciclo de vida, solicitud/recibo remoto y rechazo del servidor sin afirmar instalación. Los archivos modificados son `assets/js/{conversation,agent-integrations,access,app}.js`, `assets/css/{conversation,agent-integrations}.css`, `index.html`, `tests/{conversation,agent-integrations}.test.cjs` y este documento.
+They cover, among others: dynamic discovery and correction of a vanished model, streaming by exact fragments, classified usage, action/result cards, engine/model changes, cancellation, reconnection without duplication, budget and its warning, the `#/configuracion/ia` route, permissions, the wizard, the canonical `{target,detection}` envelope and rejection of an incomplete `200`, exact installation, the canonical DTO in installation and lifecycle, remote request/receipt, and a server rejection without claiming installation. The code lives in `assets/js/{conversation,agent-integrations,access,app}.js` and `assets/css/{conversation,agent-integrations}.css`.
 
-## Cuota diaria de IA
+## Daily AI quota
 
-El cliente consume exclusivamente los endpoints de cuota del servidor mediante
-`AssetAccess.request` (cookie, `Origin` y CSRF ya existentes); no guarda cuotas,
-saldos ni claves en almacenamiento local y no reinicia el día en el navegador.
+The client uses only the server's quota endpoints through `AssetAccess.request` (existing cookie, `Origin` and CSRF); it stores no quotas, balances or keys in local storage and does not roll the day over in the browser.
 
-| Endpoint | Uso |
+| Endpoint | Use |
 | --- | --- |
-| `GET /api/v1/agent/usage/me` | Saldo propio por financiación `company`/`personal`, día y zona horaria informados por el servidor. |
-| `GET /api/v1/agent/usage/policy` | Política diaria, zona pendiente y excepciones. Autoridad: `system.providers` en una cuenta humana. |
-| `PUT /api/v1/agent/usage/policy` | Límites de empresa y personales, zona horaria y `{cancelTimezoneChange:true}`. |
-| `PUT /api/v1/agent/usage/overrides/{userId}` | Excepción por cuenta real y financiación; `{dailyLimit:null}` es ilimitado explícito y `0` niega el envío. |
-| `DELETE /api/v1/agent/usage/overrides/{userId}?scope=company\|personal` | Hereda la política; es distinto de una excepción ilimitada o cero. |
-| `GET /api/v1/agent/usage/report` | Reporte con filtros, agrupación, totales y procedencia informados por el servidor. |
-| `GET /api/v1/agent/usage/pending?limit=100` | Retenciones pendientes o sin resolver; no son consumo liquidado. |
+| `GET /api/v1/agent/usage/me` | Own balance per `company`/`personal` funding, with the day and time zone reported by the server. |
+| `GET /api/v1/agent/usage/policy` | Daily policy, pending time zone and overrides. Authority: `system.providers` on a human account. |
+| `PUT /api/v1/agent/usage/policy` | Company and personal limits, time zone and `{cancelTimezoneChange:true}`. |
+| `PUT /api/v1/agent/usage/overrides/{userId}` | Override per real account and funding; `{dailyLimit:null}` is explicit unlimited and `0` denies sending. |
+| `DELETE /api/v1/agent/usage/overrides/{userId}?scope=company\|personal` | Inherits the policy; different from an unlimited or zero override. |
+| `GET /api/v1/agent/usage/report` | Report with filters, grouping, totals and provenance reported by the server. |
+| `GET /api/v1/agent/usage/pending?limit=100` | Pending or unresolved holds; they are not settled usage. |
 
-La política y el reporte solo se ofrecen con `system.providers` y una identidad
-humana; el rol de administración o `users.edit` no conceden esa autoridad. Para
-elegir la cuenta de una excepción se usa la lista de usuarios ya disponible si
-la sesión tiene `users.view`; sin ese permiso se pide un UUID acotado y se avisa
-de que un nombre de usuario no identifica la cuenta. Nunca se envía un nombre
-como si fuera un identificador.
+Policy and report are offered only with `system.providers` and a human identity; the administrator role or `users.edit` do not grant that authority. To choose the account for an override, the existing user list is used when the session has `users.view`; without that permission a bounded UUID is requested, with a warning that a username does not identify the account. A name is never sent as if it were an identifier.
 
-`null` significa ilimitado y `0` significa denegación explícita; un valor
-ausente significa no informado, no cero. La interfaz obliga a elegir entre
-ilimitado y un entero no negativo, y conserva ambos valores como estados
-distintos. Los campos de consumo, reservado, pendiente, disponible, legado y
-precisión reflejan exactamente lo devuelto: los nulos se muestran como **No
-disponible**. El total de caché no se suma en el cliente, el reporte no se
-pagina ni se recalcula localmente, y las filas legadas sin atribución se marcan
-como tales en lugar de asignarlas a una empresa o persona.
+`null` means unlimited and `0` means explicit denial; a missing value means not reported, not zero. The interface forces a choice between unlimited and a non-negative integer and keeps both as distinct states. Usage, reserved, pending, available, legacy and precision fields reflect exactly what is returned: nulls are shown as **Not available**. The cache total is not summed on the client, the report is neither paginated nor recalculated locally, and unattributed legacy rows are marked as such instead of being assigned to a company or person.
 
-Un cambio de zona horaria queda pendiente hasta el siguiente límite diario
-seguro y se puede cancelar; el cliente no simula el cambio de día. La vista
-personal muestra ambos saldos cuando el servidor los devuelve, pero solo resalta
-la financiación declarada por el ámbito del proveedor de la instancia activa.
-No se asume empresa para una clave personal. Si el servidor no informa el
-ámbito, no se atribuye el saldo. El saldo se refresca al terminar, cancelar o
-fallar un flujo, al enfocar la ventana, al volver a la pestaña y mediante el
-botón **Actualizar cuota**; no hay sondeo continuo. Un cierre de sesión, un
-`401` o el desmontaje descartan los datos, y una respuesta tardía de una cuenta
-anterior no puede restaurarlos.
+A time zone change stays pending until the next safe daily boundary and can be cancelled; the client does not simulate the day change. The personal view shows both balances when the server returns them, but highlights only the funding declared by the provider scope of the active instance. Company is not assumed for a personal key. If the server does not report the scope, the balance is not attributed. The balance refreshes when a stream finishes, is cancelled or fails, when the window gains focus, when returning to the tab, and through the **Refresh quota** button; there is no continuous polling. Signing out, a `401` or unmounting discard the data, and a late response for a previous account cannot restore it.
 
-El estado de cuota del motor se lee solo de `engineDTO.quota`:
-`{mode: managed\|direct\|builtin, enforcement: strict\|admission_only\|observed\|unavailable, reason, directException}`.
-Solo `managed` + `strict` se presenta como estricto antes de enviar. Un DTO
-ausente se muestra como no disponible y no estricto; nunca se deduce del nombre
-del motor, del modo proxy ni de un límite agregado del SDK.
+The engine quota state is read only from `engineDTO.quota`: `{mode: managed\|direct\|builtin, enforcement: strict\|admission_only\|observed\|unavailable, reason, directException}`. Only `managed` + `strict` is presented as strict before sending. A missing DTO is shown as unavailable and not strict; it is never deduced from the engine name, the proxy mode or an aggregate SDK limit.
 
-El editor existente de instancias y el paso de instancia nueva del asistente
-ofrecen **Cuota y enrutamiento** solo con `system.providers` en una cuenta humana.
-El modo `managed` exige un proveedor global habilitado de la lista administrativa
-existente, el identificador exacto del modelo predeterminado y un **Límite de
-contexto de entrada** entero positivo declarado por el operador dentro de lo
-admitido por el modelo y proveedor. No se deduce ningún tope de metadatos del
-modelo. El límite de salida permanece en la configuración de instalación del
-servidor (`ITSM_AGENT_MAX_OUTPUT_TOKENS`), sin un nuevo control en el navegador.
-El modo `direct` ofrece una casilla de excepción explícita para trabajos de
-empresa; no seleccionarla no autoriza una ejecución pagada de empresa. La cuota
-directa se presenta como observada, no estricta. La selección del modo no prueba
-aislamiento de red y nunca sustituye el estado `quota.enforcement` del servidor.
-Los cuatro campos (`quotaMode`, `directCompanyException`, `managedProviderId`,
-`managedContextTokens`) se envían por el transporte existente de instancias;
-al elegir directo se borran proveedor y límite gestionados con `null`, y al
-elegir gestionado se desactiva la excepción directa. Sin esa autoridad no se
-ofrecen ni se añaden esos campos al cuerpo de la solicitud.
+The existing instance editor and the wizard's new-instance step offer **Quota and routing** only with `system.providers` on a human account. `managed` mode requires an enabled global provider from the existing administrative list, the exact identifier of the default model, and a positive integer **Input context limit** declared by the operator within what the model and provider support. No ceiling is deduced from model metadata. The output limit stays in the server's installation configuration (`ITSM_AGENT_MAX_OUTPUT_TOKENS`), with no new browser control. `direct` mode offers an explicit exception checkbox for company work; leaving it unchecked does not authorize a paid company run. Direct quota is presented as observed, not strict. Choosing a mode does not prove network isolation and never replaces the server's `quota.enforcement` state. The four fields (`quotaMode`, `directCompanyException`, `managedProviderId`, `managedContextTokens`) travel through the existing instance transport; choosing direct clears the managed provider and limit with `null`, and choosing managed disables the direct exception. Without that authority the fields are neither offered nor added to the request body.
 
-Limitaciones actuales: no hay UI de liberación o reconciliación de retenciones,
-el reporte no pagina en el cliente y no se muestra un estado de certificación de
-aislamiento de red. Las pruebas de componentes cubren permisos, cero frente a
-ilimitado e inexistente, herencia, usuario real, nulos, legado, caché no sumada,
-retenciones pendientes, estado del motor, refresco y respuestas tardías; no
-sustituyen la verificación en navegador ni la suite completa.
+Current limits: there is no UI to release or reconcile holds, the report is not paginated on the client, and no network-isolation certification state is shown. Component tests cover permissions, zero versus unlimited versus missing, inheritance, real users, nulls, legacy rows, unsummed cache, pending holds, engine state, refresh and late responses; they do not replace browser verification or the full suite.

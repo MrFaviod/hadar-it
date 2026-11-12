@@ -157,4 +157,4 @@ competing scans. The stages are `upcoming` and `overdue`; a new due date is a
 new reminder cycle. Interrupted scans can be retried without completing a plan.
 
 Preparation emits `maintenance.reminders_prepared` and stores no delivery claim.
-SMTP, Telegram and Apprise delivery remain outside Phase 7.
+Reminder preparation does not deliver through SMTP, Telegram or Apprise.

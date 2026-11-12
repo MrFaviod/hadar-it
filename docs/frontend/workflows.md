@@ -1,4 +1,6 @@
-# Connected workflows
+# Imports, exports and bulk workflows (frontend)
+
+How the import wizard, reusable profiles, bulk actions, exports, attachments and warranties in the interface use the server workflow API described in [Workflows](../backend/workflows.md).
 
 ## Import and reusable profiles
 

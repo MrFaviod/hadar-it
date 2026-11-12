@@ -1,7 +1,7 @@
-# Agent and MCP operational tools
+# Agent and MCP domain tools
 
 Pydantic AI and FastMCP expose canonical inventory, maintenance, intervention,
-incident, monitoring and document services. This guide describes their implementation contracts and operational limits.
+incident, monitoring and document services. This guide describes their implementation contracts and operational limits. The compact cross-module tools built on `itsm/operations/tools.py` are in [Compact operational tools](workspace-agent-tools.md).
 
 ## Technical operations on both surfaces
 
@@ -95,7 +95,7 @@ Pydantic AI `FunctionModel`, keep `ALLOW_MODEL_REQUESTS=False`, and call real
 tools, real services and a real mounted MCP server over streamable HTTP. No
 check forwards tools through a mock transport or consumes a provider request.
 
-## Monitoring operations (Phase 8)
+## Monitoring operations
 
 Both transports call `MonitoringService` with the authenticated principal and
 the fixed `agent` or `mcp` source. They use the same bounded projection; they do

@@ -1,4 +1,4 @@
-# Directory floor-plan media (C4)
+# Directory floor-plan media
 
 A directory floor can own one bounded raster plan. The browser uploads and
 reads it through the canonical directory resource; the database never stores

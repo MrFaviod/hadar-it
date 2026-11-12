@@ -1,149 +1,142 @@
-# Grupos de redundancia en la interfaz
+# Redundancy groups in the interface
 
-Contrato de la superficie que muestra y administra los **grupos de redundancia**
-del servidor. La fase sigue siendo Vue 3 con Options API global y plantillas
-clásicas: no hay SFC, Composition API, dependencias nuevas ni renombrado del
-producto.
+The contract of the screens that show and manage the server's **redundancy groups**. The views are Vue 3 with the global Options API and classic templates: no single-file components, no Composition API and no new dependencies.
 
-## Qué representa
+For the server side, see [Redundancy groups](../backend/redundancy.md).
 
-Un grupo de redundancia declara que varias instancias **independientes** del
-inventario son réplicas de la misma carga. Cada réplica conserva su UUID, su
-código rápido, su historial y su relación `hosted_in` propia: el grupo nunca
-fusiona filas ni crea un activo «servicio» sintético. Un modo `active_active`
-reparte la carga con porcentajes configurados (por ejemplo 40 % y 60 %); un modo
-`active_passive` declara un `Principal` y al menos un `Respaldo`.
+## What a group represents
 
-El reparto es información descriptiva de inventario. No es utilización medida, no
-es CPU ni memoria del host, y la interfaz no ejecuta balanceo, replicación,
-migración, failover ni descubrimiento.
+A redundancy group declares that several **independent** inventory instances are replicas of the same workload. Each replica keeps its own UUID, quick code, history and `hosted_in` relationship: a group never merges rows or creates a synthetic "service" asset. `active_active` mode spreads the workload by configured percentages (for example 40 % and 60 %); `active_passive` mode declares a **Primary** and at least one **Backup**.
 
-## Mapa de componentes y responsabilidades
+The share is descriptive inventory information. It is not measured utilization or host CPU or memory, and the interface performs no load balancing, replication, migration, failover or discovery.
 
-| Módulo | Responsabilidad | Contrato |
+## Component map
+
+| Module | Responsibility | Contract |
 |---|---|---|
-| `assets/js/redundancy-api.js` | Único adaptador de redundancia: páginas acotadas, búsqueda acotada de activos, alta/edición/desactivación y estado de sesión. Época monotónica propia y `AbortController` por recurso. | `window.AssetRedundancy.{data,computed,methods}`; `GET|POST /redundancy-groups`, `GET|PATCH /redundancy-groups/{id}`, `POST /redundancy-groups/{id}/deactivate` |
-| `OrganizationRelations` (`relations-views.js`) | Sección «Redundancia» dentro de la ficha del activo: grupos del activo, rol, reparto y host; alta/edición/desactivación desde el mismo panel. | props `asset`, `app`; usa `app.redundancy`, `app.redundancy.dialog`, permisos `assets.view` / `assets.edit` |
-| `GraphExplorer` (`graph-views.js`, `graph-layout.js`) | Panel lateral de grupos cargados, marca de pertenencia en el nodo y bloque del inspector con rol, reparto y host. Sin aristas nuevas. | `app.serverGraphMode`, `app.redundancy.groups`, `app.redundancyGroupForAsset` |
-| `app.js` | Registra el mixin y enlaza ruta, cierre de sesión y desmontaje con `handleRedundancyRoute` / `clearRedundancyState`. | `window.AssetRedundancy` |
+| `assets/js/redundancy-api.js` | The single redundancy adapter: bounded pages, bounded asset search, create/edit/deactivate and session state. Its own monotonic epoch and an `AbortController` per resource. | `window.AssetRedundancy.{data,computed,methods}`; `GET|POST /redundancy-groups`, `GET|PATCH /redundancy-groups/{id}`, `POST /redundancy-groups/{id}/deactivate` |
+| `OrganizationRelations` (`relations-views.js`) | The **Redundancy** section on the asset record: the asset's groups, role, share and host; create/edit/deactivate from the same panel. | props `asset`, `app`; uses `app.redundancy`, `app.redundancy.dialog`, permissions `assets.view` / `assets.edit` |
+| `GraphExplorer` (`graph-views.js`, `graph-layout.js`) | Side panel of loaded groups, membership mark on the node, and an inspector block with role, share and host. No new edges. | `app.serverGraphMode`, `app.redundancy.groups`, `app.redundancyGroupForAsset` |
+| `app.js` | Registers the mixin and wires route, sign-out and unmount to `handleRedundancyRoute` / `clearRedundancyState`. | `window.AssetRedundancy` |
 
-## Contratos REST usados (sin rutas inventadas)
+## REST contracts used
 
 - `GET /redundancy-groups?query&active&mode&limit&offset` → `{total, limit, offset, items}`.
-- `GET /redundancy-groups/{id}` → grupo con `members`.
-- `POST /redundancy-groups` → `201` con el grupo completo.
-- `PATCH /redundancy-groups/{id}` → subconjunto de campos; `members` siempre es la
-  lista **completa** y `"description": null` borra la descripción.
-- `POST /redundancy-groups/{id}/deactivate` → `active=false` conservando filas.
+- `GET /redundancy-groups/{id}` → the group with `members`.
+- `POST /redundancy-groups` → `201` with the full group.
+- `PATCH /redundancy-groups/{id}` → a subset of fields; `members` is always the
+  **complete** list and `"description": null` clears the description.
+- `POST /redundancy-groups/{id}/deactivate` → `active=false`, keeping rows.
 
-DTO del grupo: `id`, `name`, `description`, `mode` (`active_active` |
+Group DTO: `id`, `name`, `description`, `mode` (`active_active` |
 `active_passive`), `active`, `createdAt`, `updatedAt`, `memberCount`,
-`members[]`. Cada miembro: `assetId`, `name`, `quickCode`, `archived`, `role`
-(`primary` | `backup` | `null`), `share` (cadena decimal exacta o `null`) y
-`host` (`{id, name}` o `null`). El adaptador no inventa campos ni traduce el
-reparto a números de coma flotante.
+`members[]`. Each member: `assetId`, `name`, `quickCode`, `archived`, `role`
+(`primary` | `backup` | `null`), `share` (exact decimal string or `null`) and
+`host` (`{id, name}` or `null`). The adapter invents no fields and does not
+convert the share to floating point.
 
-## Reglas de interfaz
+## Interface rules
 
-- **Pertenencia acotada.** El endpoint de lista no filtra por activo. La ficha
-  consulta una página acotada (`limit=200`, `offset=0`) y compara `members[].assetId`;
-  declara `examinados` frente a `total` cuando hay grupos fuera de la página. No
-  se carga el inventario completo ni se inventa un endpoint.
-- **Búsqueda acotada de activos.** El selector de miembros consulta
-  `GET /assets/search?limit=50&offset=0&query=…` con retardo y cancelación propios;
-  nunca filtra en cliente la primera página como si fuese el inventario.
-- **Reemplazo completo.** Guardar envía la lista entera de miembros en una sola
-  petición; no hay escrituras parciales por miembro.
-- **Validación de cliente.** Nombre obligatorio y como máximo 50 activos
-  distintos. Un alta y un grupo activo exigen al menos 2 réplicas; un grupo
-  inactivo puede quedar con 0 o 1, que es lo que el servidor acepta al limpiarlo.
-  En `active_active` cada miembro lleva un reparto finito con dos decimales como
-  máximo y, cuando la lista está completa (2 o más), la suma es exactamente 100;
-  con una sola réplica no se exige suma. En `active_passive` cada miembro lleva
-  rol — como mucho un `Principal` y, con la lista completa, exactamente uno más al
-  menos un `Respaldo` — y ningún reparto. El servidor sigue siendo la autoridad:
-  sus `422`, `409`, `403` y `404` se muestran tal cual y no se convierten en éxito.
-- **Descripción opcional.** Vaciar el campo envía `description: null`; no se omite
-  el campo ni se conserva el valor anterior.
-- **Modo.** Cambiar de modo envía la lista completa de miembros, porque el
-  servidor exige el estado completo en la misma petición. No se cambian roles ni
-  repartos por cuenta propia.
-- **Desactivar / reactivar.** Desactivar usa `POST …/deactivate`; reactivar usa
-  `PATCH {active:true}`. Un `409` (por ejemplo, un miembro archivado o un grupo ya
-  inactivo) se muestra en el diálogo, que conserva el formulario y los datos
-  canónicos ya cargados. No se deja un grupo activo vacío ni se simula el cambio.
-- **Sin respaldo local.** Un error de carga, un `403` o una falta de permiso
-  muestran un mensaje factual; nunca se rellenan con datos de demostración,
-  `localStorage` ni un éxito inventado. Las lecturas requieren `assets.view`; las
-  escrituras, `assets.edit`.
+- **Bounded membership.** The list endpoint does not filter by asset. The record
+  reads one bounded page (`limit=200`, `offset=0`) and compares `members[].assetId`;
+  it states how many groups were examined against the `total` when groups fall
+  outside the page. The full inventory is not loaded and no endpoint is invented.
+- **Bounded asset search.** The member picker queries
+  `GET /assets/search?limit=50&offset=0&query=…` with its own debounce and
+  cancellation; it never filters the first page on the client as if it were the
+  whole inventory.
+- **Full replacement.** Saving sends the entire member list in one request;
+  there are no partial per-member writes.
+- **Client validation.** A name is required and at most 50 distinct assets are
+  allowed. Creating a group, and any active group, requires at least 2 replicas;
+  an inactive group may keep 0 or 1, which is what the server accepts when
+  clearing it. In `active_active` each member carries a finite share with at most
+  two decimals and, when the list is complete (2 or more), the sum is exactly
+  100; with a single replica no sum is required. In `active_passive` each member
+  carries a role — at most one **Primary** and, with the complete list, exactly
+  one plus at least one **Backup** — and no share. The server remains the
+  authority: its `422`, `409`, `403` and `404` are shown as they are and never
+  turned into success.
+- **Optional description.** Emptying the field sends `description: null`; the
+  field is not omitted and the previous value is not kept.
+- **Mode.** Changing mode sends the complete member list, because the server
+  requires the full state in the same request. Roles and shares are not changed
+  on the client's own initiative.
+- **Deactivate / reactivate.** Deactivating uses `POST …/deactivate`;
+  reactivating uses `PATCH {active:true}`. A `409` (for example, an archived
+  member or an already inactive group) is shown in the dialog, which keeps the
+  form and the canonical data already loaded. No active group is left empty and
+  the change is never simulated.
+- **No local fallback.** A load error, a `403` or a missing permission shows a
+  factual message; it is never filled with demo data, `localStorage` or an
+  invented success. Reads require `assets.view`; writes, `assets.edit`.
 
-## Estado, sesión e interacción
+## State, session and interaction
 
-`redundancy-api.js` mantiene su propia época monotónica (nunca se reinicia), una
-marca de sesión que avanza al cerrar sesión o desmontar y una época de
-interacción que avanza al abrir o cerrar el diálogo y al abandonar la ruta.
+`redundancy-api.js` keeps its own monotonic epoch (never reset), a session mark
+that advances on sign-out or unmount, and an interaction epoch that advances
+when the dialog opens or closes and when the route is left.
 
-- **Identidad de sesión.** El token de escritura incluye la identidad efectiva
-  (`activeUserId` y el conjunto de permisos ordenado) junto con la época. Un
-  `/auth/me` que reemplaza la sesión por otra identidad o por permisos de sólo
-  lectura deja `authenticated` en `true`, pero invalida la escritura en vuelo: no
-  hay aviso, ni refresco, ni `true`, ni filas tardías. Un chequeo periódico del
-  mismo usuario con los mismos permisos (aunque cambie el CSRF o el orden del
-  arreglo) no cancela una escritura legítima.
-- **Propiedad de la interacción.** Guardar está atado al diálogo concreto y a su
-  época: cerrar el diálogo, abrirlo de nuevo o cambiar de ruta impide que una
-  respuesta tardía cierre otro borrador, escriba su error o marque `busy`.
-  Desactivar y reactivar usan un token de vista, de modo que abrir o cerrar el
-  diálogo no los cancela; un cambio de ruta o el desmontaje sí.
-- **Salidas.** Desmontar la ficha cierra su diálogo, cancela la búsqueda en cola y
-  avanza la época de panel, de modo que una operación del panel que seguía en
-  vuelo —desactivar o reactivar— tampoco se presenta como propia: su respuesta
-  tardía no devuelve éxito, no refresca la pertenencia y no escribe un error. Un
-  cambio de ruta hace lo mismo y descarta lo que quedó en vuelo. La petición ya
-  enviada puede haberse aplicado en el servidor: el cliente no afirma haberla
-  cancelado, sólo deja de presentarla como propia.
-- Un `401` o el cierre de sesión vacían el estado y abortan las lecturas, y una
-  respuesta tardía no revive nada. El texto de búsqueda pendiente se cancela con
-  su temporizador. El dominio del servidor nunca se escribe en `localStorage`.
+- **Session identity.** The write token includes the effective identity
+  (`activeUserId` and the sorted permission set) together with the epoch. An
+  `/auth/me` that replaces the session with another identity or with read-only
+  permissions leaves `authenticated` as `true` but invalidates the in-flight
+  write: no notice, no refresh, no `true`, no late rows. A periodic check of the
+  same user with the same permissions (even if the CSRF token or the array order
+  changes) does not cancel a legitimate write.
+- **Interaction ownership.** Saving is bound to the specific dialog and its
+  epoch: closing the dialog, reopening it or changing route prevents a late
+  response from closing another draft, writing its error or setting `busy`.
+  Deactivate and reactivate use a view token, so opening or closing the dialog
+  does not cancel them; a route change or unmount does.
+- **Exits.** Unmounting the record closes its dialog, cancels the queued search
+  and advances the panel epoch, so a panel operation still in flight —
+  deactivate or reactivate — is no longer presented as its own: its late response
+  returns no success, does not refresh membership and writes no error. A route
+  change does the same and discards what was left in flight. A request already
+  sent may have been applied on the server: the client does not claim to have
+  cancelled it, it only stops presenting it as its own.
+- A `401` or sign-out empties the state and aborts reads, and a late response
+  revives nothing. Pending search text is cancelled with its timer. The server
+  domain is never written to `localStorage`.
 
-## Interacción final en la ficha del activo
+## On the asset record
 
-- El alta abierta desde la ficha de un activo **siembra ese activo** como primera
-  réplica del borrador (`openRedundancyCreate(this.asset)`). El panel pertenece a
-  la ficha y un grupo creado allí debe incluirla; el activo sembrado no reaparece
-  en los resultados de búsqueda, y se puede retirar con su propio control antes de
-  guardar.
-- Los miembros ya cargados muestran `Principal`/`Respaldo` o `Reparto de carga N %`
-  y el host real de cada réplica; el activo de la ficha se distingue con
-  «Este activo». Un grupo sin host registrado dice «Sin host registrado» en vez de
-  suponer uno.
-- La ficha declara `Se examinaron X de Y grupos` y, si la página acotada no cubre
-  el total, advierte que puede haber grupos fuera de ella. Cuando la página está
-  recortada y ningún grupo examinado incluye el activo, el texto dice que ninguno
-  de los examinados lo incluye y que el resto no se consultó; la ausencia
-  definitiva («no pertenece a ningún grupo») sólo se afirma con la página completa.
-- Desactivar y reactivar actúan sobre el grupo completo y refrescan la ficha y el
-  grafo; un rechazo del servidor deja el grupo como estaba y el mensaje en pantalla.
+- Creating a group from an asset's record **seeds that asset** as the draft's
+  first replica (`openRedundancyCreate(this.asset)`). The panel belongs to the
+  record and a group created there must include it; the seeded asset does not
+  reappear in search results and can be removed with its own control before
+  saving.
+- Loaded members show **Primary**/**Backup** or **Load share N %** and each
+  replica's real host; the record's own asset is marked **This asset**. A group
+  without a recorded host says **No registered host** instead of assuming one.
+- The record states **Examined X of Y groups** and, if the bounded page does not
+  cover the total, warns that groups may exist outside it. When the page is
+  truncated and no examined group includes the asset, the text says none of the
+  examined groups includes it and the rest were not read; a definitive absence
+  ("belongs to no group") is only stated with the complete page.
+- Deactivate and reactivate act on the whole group and refresh the record and
+  the graph; a server rejection leaves the group as it was and the message on
+  screen.
 
-## Grafo
+## Graph
 
-La pertenencia se muestra como información del grupo —panel lateral, marca en el
-nodo y bloque del inspector con `Principal`/`Respaldo`, `Reparto de carga` y el
-host real del miembro—. No se añaden nodos ni aristas al grafo: el alojamiento
-sigue siendo la relación dirigida `hosted_in`, y la marca de redundancia no
-sustituye esa semántica. Si la página cargada no cubre todos los grupos, el panel
-lo dice en lugar de presentar el conjunto parcial como completo.
+Membership is shown as group information — a side panel, a mark on the node and
+an inspector block with **Primary**/**Backup**, **Load share** and the member's
+real host. No nodes or edges are added to the graph: hosting remains the
+directed `hosted_in` relationship, and the redundancy mark does not replace that
+meaning. If the loaded page does not cover all groups, the panel says so instead
+of presenting the partial set as complete.
 
-## Límites conocidos
+## Known limits
 
-- La prueba integrada usa SQLite y un único navegador Chromium; no certifica otros
-  motores, navegadores ni producción.
-- El panel del grafo muestra sólo los grupos con algún miembro en la página
-  cargada; si el grafo está truncado, lo dice en lugar de completar el conjunto.
-- La prueba de navegador no repite la comprobación de archivado con grupo activo
-  (ya cubierta por el backend): sólo verifica el `409` de reactivación y que el
-  grupo no cambia.
-- Las carreras de sesión, de interacción y de desmontaje se prueban con
-  transporte diferido en Node, montando el componente real y desmontándolo; el
-  navegador no provoca esas carreras. No hay, por tanto, prueba de navegador de
-  este caso concreto.
+- The integrated test uses SQLite and a single Chromium browser; it does not
+  certify other engines, browsers or production.
+- The graph panel shows only groups with some member in the loaded page; if the
+  graph is truncated, it says so instead of completing the set.
+- The browser test does not repeat the archived-member check on an active group
+  (already covered by the backend): it only verifies the reactivation `409` and
+  that the group does not change.
+- Session, interaction and unmount races are tested with deferred transport in
+  Node, mounting and unmounting the real component; the browser does not provoke
+  those races, so there is no browser test for this case.

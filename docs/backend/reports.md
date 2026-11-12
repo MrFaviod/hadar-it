@@ -1,6 +1,6 @@
 # Reports, QR codes, labels and generated documents
 
-Phase 9 turns the existing reporting, template, QR and label screens into real
+Reporting turns the reporting, template, QR and label screens into real
 authorized documents. One canonical `ReportService` serves HTTP, background
 jobs, Pydantic AI and FastMCP; the Vue interface never computes report data.
 

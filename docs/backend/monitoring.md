@@ -1,6 +1,6 @@
 # Monitoring, alerts and maintenance windows
 
-Phase 8 adds read-only device monitoring on top of the inventory. Prometheus and
+Monitoring adds read-only device monitoring on top of the inventory. Prometheus and
 Alertmanager remain the source of truth for checks: this module discovers assets,
 serves bounded read models, records alert lifecycle and links it to canonical
 incidents and notifications. It does not evaluate checks or compete with

@@ -1,4 +1,4 @@
-# global search
+# Global search
 
 Canonical, permission-aware search over the SQL source of truth, with an
 optional Meilisearch index for relevance. The index is never authoritative:
@@ -16,7 +16,7 @@ caller, and engine loss degrades to SQL instead of failing the request.
 | `itsm/search/models.py` | `SearchSyncOutbox`, `SearchIndexState` |
 | `itsm/search/api.py` | `create_search_router(...)` |
 
-## HTTP contract (C2)
+## HTTP contract
 
 `GET {api_prefix}/search?q=&kind=&limit=&offset=`
 

@@ -154,7 +154,7 @@ written before this column existed) is delivered exactly as its stored
 translated. Monitoring builds its keys from `api.monitoring.alert.*`, and the
 sample message from `POST /notifications/channels/{id}/test` uses
 `api.notifications.test_*`. The inbox DTO is unchanged and still returns the
-rendered `title`/`body`; see `docs/backend/i18n.md` for the shared seam.
+rendered `title`/`body`; see [Internationalization (core, registry and language packs)](i18n.md) for the shared seam.
 
 ## HTTP API
 

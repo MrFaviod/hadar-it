@@ -1,64 +1,58 @@
-# inventario real en el frontend existente
+# Inventory in the frontend
 
-Alcance: sustituir las simulaciones correspondientes por operaciones reales sobre
-`/api/v1/assets` y `/api/v1/inventory/config`, conservando las vistas, el diseño
-navy/teal, los formularios, la búsqueda, los filtros y las rutas hash existentes.
-No se migran SFC ni Composition API y no se añade ningún framework ni dependencia.
+How the inventory views talk to the server: assets through `/api/v1/assets` and the inventory catalog through `/api/v1/inventory/config`. The views, navy/teal design, forms, search, filters and hash routes are the existing ones; there are no single-file components, no Composition API and no extra framework or dependency.
 
-## Mapa de componentes (responsabilidad y contrato)
+## Component map
 
-Las vistas siguen siendo Options API de Vue 3 dentro del host React 19. El estado
-compartido vive en la raíz (`app.js`); los paneles reciben `app` por prop y llaman
-a sus métodos (props-down / events-up mediante el objeto `app` ya existente).
+The views are Vue 3 Options API components inside the React 19 host. Shared state lives at the root (`app.js`); panels receive `app` as a prop and call its methods (props down, events up through the existing `app` object).
 
-| Componente / módulo | Responsabilidad | Props / eventos |
+| Component / module | Responsibility | Props / events |
 | --- | --- | --- |
-| `assets/js/inventory-api.js` (`window.AssetInventory`) | Adaptador único del inventario servidor: lista, detalle, editor, ciclo de vida, medios, historial y catálogo. Dueño de la época monótona y de los `AbortController`. | `data`/`computed`/`methods` mezclados en la raíz (`app.js`). Sin props. |
-| `assets/js/asset-editor.js` (`AssetEditor`, `AssetCommonField`) | Diálogo de alta y edición. En modo servidor muestra coste, campos técnicos tipados, fotografía, campo de visión y estado del catálogo; en modo demostración mantiene el formulario prototipo. | Props: `app`. Eventos: `@close` del `ModalShell`; guardado vía `app.saveAsset()`. |
-| `assets/js/asset-config-views.js` (`AssetFieldsPanel`, `AssetFormsPanel`, `AssetStatusesPanel`, `AssetIdentityPanel`) | Configuración real de la biblioteca de campos, formularios por categoría, estados y reglas de identificación. Sustituye el borrado destructivo por desactivación. | Props: `app`. Acciones vía `app.*` (mismos nombres que la simulación donde fue posible). |
-| `assets/js/config.js` (`window.AssetConfigMethods`) | Métodos heredados de configuración demostrativa; el adaptador `inventory-api.js` sustituye las operaciones del catálogo real e impide el fallback local cuando el servidor no está disponible. | Métodos sobre la raíz. |
-| `assets/js/asset-admin.js` | Se conserva para los activos de demostración y para la configuración local que no tiene API (sedes, personas, integraciones). El inventario y su catálogo ya no se leen de `localStorage`. | Métodos sobre la raíz. |
-| `assets/js/app.js` | Composición final: mezcla el adaptador al final, arranca/limpia la sesión y expone `deviceImagePresets` para las ilustraciones de categoría. | Raíz Vue. |
-| `index.html` | Plantilla canónica: vista de inventario, ficha de activo, configuración de activos y diálogos. | Plantilla Vue 3. |
-| `assets/css/inventory.css` | Añadidos visuales mínimos de la fase 4 (medios, historial, ciclo de vida) sobre los tokens existentes. | — |
+| `assets/js/inventory-api.js` (`window.AssetInventory`) | The single adapter for server inventory: list, detail, editor, lifecycle, media, history and catalog. Owns the monotonic epoch and the `AbortController`s. | `data`/`computed`/`methods` mixed into the root (`app.js`). No props. |
+| `assets/js/asset-editor.js` (`AssetEditor`, `AssetCommonField`) | Create and edit dialog. In server mode it shows cost, typed technical fields, photo, field of view and catalog status; in demo mode it keeps the prototype form. | Props: `app`. Events: `@close` from `ModalShell`; saving through `app.saveAsset()`. |
+| `assets/js/asset-config-views.js` (`AssetFieldsPanel`, `AssetFormsPanel`, `AssetStatusesPanel`, `AssetIdentityPanel`) | Real configuration of the field library, per-category forms, statuses and identification rules. Deactivation replaces destructive deletion. | Props: `app`. Actions through `app.*`. |
+| `assets/js/config.js` (`window.AssetConfigMethods`) | Legacy demo configuration methods; `inventory-api.js` replaces the real catalog operations and prevents a local fallback when the server is unavailable. | Methods on the root. |
+| `assets/js/asset-admin.js` | Kept for demo assets and for local configuration without an API (sites, people, integrations). Inventory and its catalog are no longer read from `localStorage`. | Methods on the root. |
+| `assets/js/app.js` | Final composition: mixes in the adapter last, starts and clears the session, and exposes `deviceImagePresets` for category illustrations. | Vue root. |
+| `index.html` | Canonical template: inventory view, asset record, asset configuration and dialogs. | Vue 3 template. |
+| `assets/css/inventory.css` | Minimal visual additions (media, history, lifecycle) on the existing tokens. | — |
 
-## Contrato del adaptador
+## Adapter contract
 
 - `GET /api/v1/inventory/config` → `{fields, categories, statuses, rules, commonFields, operations}`.
-  `operations.environment` y `operations.purge` son la política del servidor; el
-  navegador no decide el entorno ni inventa permisos. Si el DTO no llega, la
-  eliminación definitiva queda deshabilitada con un aviso explícito.
-- `GET /api/v1/assets/search` y `GET /api/v1/assets/{id}` → lista paginada y ficha.
-- `POST /assets`, `PATCH /assets/{id}` → solo campos del contrato; el ID permanente
-  es inmutable y el código rápido vacío lo asigna el servidor.
+  `operations.environment` and `operations.purge` are the server's policy; the
+  browser does not decide the environment or invent permissions. If the DTO is
+  missing, permanent deletion is disabled with an explicit notice.
+- `GET /api/v1/assets/search` and `GET /api/v1/assets/{id}` → paginated list and record.
+- `POST /assets`, `PATCH /assets/{id}` → contract fields only; the permanent ID
+  is immutable and an empty quick code is assigned by the server.
 - `POST /assets/{id}/clone|archive|restore|retire|purge`, `GET /assets/{id}/history`.
-- `PUT|DELETE /assets/{id}/images/{photo|fov}` con cuerpo binario ≤ 1 MiB y sin SVG.
-- `PUT /inventory/config/{fields|categories|statuses|rules}/{clave}` → metadatos no
-  destructivos; los tipos y las opciones existentes no se pueden reescribir.
+- `PUT|DELETE /assets/{id}/images/{photo|fov}` with a binary body ≤ 1 MiB and no SVG.
+- `PUT /inventory/config/{fields|categories|statuses|rules}/{clave}` → non-destructive
+  metadata; existing types and options cannot be rewritten.
 
-## Corrección tras revisión
+## Permissions and catalog
 
-- El catálogo de permisos del cliente incluye `assets.purge` con la etiqueta
-  «Eliminar definitivamente»: la concesión real de `/auth/me` ya no se pierde al
-  filtrar permisos y los grupos de rol la muestran. Sigue siendo una concesión
-  explícita del servidor, sin ampliación implícita.
-- La configuración se autoriza con los permisos reales del backend: campos,
-  categorías y formularios con `config.categories`; estados, reglas y
-  transiciones con `config.general`. `assets.edit` ya no habilita escrituras del
-  catálogo, y cada sección muestra solo los controles que el rol puede guardar.
-- `#/configuracion/categorias` carga el catálogo del servidor y crea o edita
-  categorías (etiqueta, prefijo, tipo, disponibilidad) con `PUT` sobre
-  `/inventory/config/categories/{id}`, conservando formulario y campos técnicos.
-  Sin catálogo cargado no se ofrece ninguna escritura ni se usa el estado local.
-- Si el catálogo responde con error (por ejemplo 500), la configuración muestra
-  el mensaje del servidor, desactiva los controles de escritura y ofrece
-  «Reintentar»; no se persiste nada en `localStorage` ni se anuncia un éxito
-  ficticio.
+- The client permission catalog includes `assets.purge`, labeled **Permanently
+  delete**: the real grant from `/auth/me` is not lost when permissions are
+  filtered, and role groups show it. It remains an explicit server grant, with
+  no implicit widening.
+- Configuration is authorized with the backend's real permissions: fields,
+  categories and forms with `config.categories`; statuses, rules and
+  transitions with `config.general`. `assets.edit` does not enable catalog
+  writes, and each section shows only the controls the role can save.
+- `#/configuracion/categorias` loads the server catalog and creates or edits
+  categories (label, prefix, type, availability) with `PUT` on
+  `/inventory/config/categories/{id}`, keeping the form and technical fields.
+  Without a loaded catalog no write is offered and local state is not used.
+- If the catalog responds with an error (for example 500), configuration shows
+  the server message, disables write controls and offers **Retry**; nothing is
+  persisted to `localStorage` and no fictitious success is announced.
 
-## Límites conocidos
+## Known limits
 
-- La eliminación definitiva depende de la política del servidor: en producción
-  exige `assets.purge`, archivo previo, ID escrito y motivo; el navegador solo la
-  refleja. No se expone ninguna herramienta de purga a agentes.
-- El smoke de navegador usa SQLite en bucle local; no cubre PostgreSQL/MariaDB,
-  concurrencia real de códigos ni proveedores de modelos.
+- Permanent deletion depends on the server policy: in production it requires
+  `assets.purge`, prior archiving, the typed ID and a reason; the browser only
+  reflects it. No purge tool is exposed to agents.
+- The browser smoke test uses SQLite on loopback; it does not cover
+  PostgreSQL/MariaDB, real concurrency of codes or model providers.

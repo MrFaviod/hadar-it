@@ -1,54 +1,54 @@
-# Perfiles de sistema (frontend)
+# System profiles (frontend)
 
-La administración del negocio y la propiedad de la instalación son distintas. El navegador solo presenta lo que el servidor autoriza: los permisos efectivos, los roles y su etiqueta llegan de la API de identidad; no hay autoridad en `localStorage`/`sessionStorage` ni promoción de roles en el cliente.
+Running the business and owning the installation are different roles. The browser only presents what the server authorizes: effective permissions, roles and their labels come from the identity API; there is no authority in `localStorage`/`sessionStorage` and no role promotion on the client.
 
-## Perfiles
+## Profiles
 
-- **Superadmin**: propietario de la instalación. Recibe los seis permisos reservados `system.*` y conserva los permisos de negocio. Solo un humano con `superadmin` puede ejercerlos; una identidad de máquina necesita un superadmin humano activo como delegador.
-- **Admin**: administra el negocio (incluido `config.integrations`), pero no recibe permisos `system.*` ni puede otorgarse roles reservados. El techo existente `canAssignRole` sigue aplicando: un rol solo es asignable si quien edita ya posee todos sus permisos.
-- **User**: lectura por defecto (`assets.view`, `people.view`) con concesiones de negocio acotadas.
+- **Superadmin**: owner of the installation. Receives the six reserved `system.*` permissions and keeps the business permissions. Only a human with `superadmin` can exercise them; a machine identity needs an active human superadmin as its delegator.
+- **Admin**: manages the business (including `config.integrations`), but receives no `system.*` permissions and cannot grant itself reserved roles. The existing `canAssignRole` ceiling still applies: a role is assignable only if the editor already holds all its permissions.
+- **User**: read access by default (`assets.view`, `people.view`) with bounded business grants.
 
-El primer Superadmin se crea por CLI (`bootstrap-superadmin`); la web nunca eleva roles. Los roles base se reconocen por `builtIn`/`system` del servidor, no por su identificador.
+The first Superadmin is created from the CLI (`bootstrap-superadmin`); the web interface never elevates roles. Built-in roles are recognized by the server's `builtIn`/`system` flags, not by their identifier.
 
-## Sección Sistema
+## System section
 
-`#/configuracion/sistema` es una sección más de la navegación de Configuración, visible solo con `system.view`. Admin y User reciben la ruta denegada; las peticiones directas a la API responden `403`.
+`#/configuracion/sistema` is one more section of the Settings navigation, visible only with `system.view`. Admin and User get the denied route; direct API requests answer `403`.
 
-Los controles se habilitan con su propio permiso:
+Each control is enabled by its own permission:
 
-| Control | Permiso |
+| Control | Permission |
 | --- | --- |
-| Estado, configuración y proveedores (lectura) | `system.view` |
-| Guardar clasificación de despliegue y ventana de mantenimiento | `system.configure` |
-| Elegir proveedor y modelo predeterminados | `system.providers` |
-| Consultar y habilitar/deshabilitar módulos | `system.modules` |
-| Crear respaldo | `system.backup` |
-| Preparar actualización | `system.update` |
-| Comprobar despliegue | `system.view` |
+| Status, configuration and providers (read) | `system.view` |
+| Save deployment classification and maintenance window | `system.configure` |
+| Choose the default provider and model | `system.providers` |
+| View and enable/disable modules | `system.modules` |
+| Create a backup | `system.backup` |
+| Prepare an update | `system.update` |
+| Check the deployment | `system.view` |
 
-Administración de IA (`#/configuracion/ia`): la preferencia de chat y modelo sigue disponible con `assets.view`; instancias, catálogo, instalaciones y el asistente requieren `system.providers`, y mutar un módulo desde el catálogo requiere además `system.modules`.
+AI administration (`#/configuracion/ia`): the conversation and model preference stays available with `assets.view`; instances, catalog, installations and the wizard require `system.providers`, and changing a module from the catalog also requires `system.modules`.
 
-## Contrato de API
+## API contract
 
-Base `/api/v1/system`, mismo transporte que el resto de la aplicación (sesión same-origin, CSRF en escrituras, cancelación por señal):
+Base `/api/v1/system`, with the same transport as the rest of the application (same-origin session, CSRF on writes, cancellation by signal):
 
 - `GET /status` → `{ready, checkedAt, app:{name,version,mode,database}, readiness:{database,migrations,current,head}, executor:{configured,available,actions,detail}}`.
 - `GET /configuration` → `{deployment:{classification,maintenanceWindow,database}, executor:{configured}}`.
-- `PATCH /configuration` con `{deployment:{classification?,maintenanceWindow?}}`; no se envían otras claves. «Clasificación de despliegue configurada» es una preferencia y no cambia el entorno real del proceso.
-- `GET /providers` → `{selected, selection, providers:[{id,label,credentialConfigured,credentialEnv}]}`. `PUT /providers` envía solo `{provider,model}`; nunca viajan credenciales.
-- `GET /modules` → `{modules:[...]}`; `PATCH /modules/{id}` con `{enabled}`. El módulo oficial no se puede deshabilitar (`409`).
-- `POST /operations` con `{action:"deployment.status"|"update.prepare"|"backup.create"}` → `{action,state,result,reference,exitCode,startedAt,durationMs,message}`. El servidor elige el ejecutor; la UI no envía rutas, comandos ni endpoints.
+- `PATCH /configuration` with `{deployment:{classification?,maintenanceWindow?}}`; no other keys are sent. The configured deployment classification is a preference and does not change the process's real environment.
+- `GET /providers` → `{selected, selection, providers:[{id,label,credentialConfigured,credentialEnv}]}`. `PUT /providers` sends only `{provider,model}`; credentials never travel.
+- `GET /modules` → `{modules:[...]}`; `PATCH /modules/{id}` with `{enabled}`. The official module cannot be disabled (`409`).
+- `POST /operations` with `{action:"deployment.status"|"update.prepare"|"backup.create"}` → `{action,state,result,reference,exitCode,startedAt,durationMs,message}`. The server chooses the executor; the UI sends no paths, commands or endpoints.
 
-## Ejecutor externo
+## External executor
 
-Un ejecutor no configurado o inalcanzable se muestra como **no configurado** o **no disponible**, con el detalle público del servidor. Las acciones que dependen de él quedan deshabilitadas y nunca se presenta un resultado inventado. Una respuesta `state:"unavailable"` se muestra como tal; solo `state:"completed"` con `reference` del servidor se presenta como respaldo completado.
+An unconfigured or unreachable executor is shown as not configured or not available, with the server's public detail. Actions that depend on it are disabled and an invented result is never shown. A `state:"unavailable"` response is shown as such; only `state:"completed"` with a server `reference` is presented as a completed backup.
 
-## Pruebas enfocadas
+## Focused tests
 
-Desde `frontend/`:
+From `frontend/`:
 
 ```bash
 node --test tests/system-profiles.test.mjs
 ```
 
-Cubren catálogo/permisos, ruta y denegación, lectura mínima, guardado anidado de configuración, proveedor sin secretos, módulos incluido el oficial, operaciones completadas/no disponibles, limpieza al cerrar sesión, metadatos de rol del servidor y el techo de asignación.
+They cover catalog and permissions, route and denial, minimal read access, nested configuration saving, provider selection without secrets, modules including the official one, completed and unavailable operations, cleanup on sign-out, server role metadata and the assignment ceiling.

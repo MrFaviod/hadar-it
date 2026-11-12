@@ -1,9 +1,9 @@
 # Relationships and structured history
 
-Phase 5 adds typed directed relationships between permanent assets and enriches
+Relationships add typed directed relationships between permanent assets and enriches
 asset history with trusted origin/entity metadata. This document describes the
-backend contract only. REST wiring is mounted by the parent integration task;
-directory/location filters and Vue use are explicitly out of this slice.
+backend contract; the REST router is mounted in `itsm/main.py`, and the interface
+side is in [Directory, relationships, graph and map](../frontend/organization.md).
 
 ## Authority and surfaces
 

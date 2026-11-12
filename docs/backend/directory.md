@@ -8,7 +8,7 @@ without turning it into an access account.
 
 - A person is an **inventory record**: no credential, session, role, group or
   `Identity` row is created, and no login path exists here. Installation,
-  identity administration and machine identities stay in `docs/backend/identity.md`.
+  identity administration and machine identities stay in [Identity, authentication and authorization](identity.md).
 - Directory never matches legacy free text automatically. `Asset.responsible`
   and `Identity.person_id` are not resolved, back-filled or compared against
   person names, and no person, department, site, asset or user is seeded.
@@ -184,9 +184,8 @@ person explicitly.
 
 ## Adapters and permissions
 
-REST (`itsm/directory/api.py`) is the only transport in this change. Its
-`source` is always `rest`. An agent or MCP surface added later must pass
-`agent`/`mcp` and reuse the same service methods; no new permission, role
+REST (`itsm/directory/api.py`) passes `source` `rest`. The agent runtime and the
+MCP server pass `agent`/`mcp` and reuse the same service methods; no new permission, role
 shortcut or administrator bypass was introduced. Directory uses the existing
 catalog codes `people.view`, `people.create`, `people.edit`,
 `config.departments`, `config.sites` and `assets.view`, so the built-in

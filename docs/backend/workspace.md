@@ -1,4 +1,4 @@
-# operations dashboard and durable workspace
+# Operations dashboard and workspace
 
 The dashboard is a read projection over canonical modules. It never falls back
 to demo data: absent Prometheus telemetry is reported as `unknown`, and every
@@ -100,7 +100,7 @@ State DTO:
 | `GET /dashboard?period&category&siteId` | `assets.view` |
 | `GET|PUT /workspace/state` | authenticated |
 | `GET|POST /workspace/shortcuts` | authenticated; shared create/update requires `config.general` |
-| `PATCH|DELETE /workspace/shortcuts/{id}` | personal owner; shared row requires `config.general` |
+| `PATCH|DELETE /workspace/shortcuts/{id}` | owner only; shared row additionally requires `config.general` |
 | `GET|POST /workspace/views` | authenticated; shared create requires `config.general` |
 | `PATCH|DELETE /workspace/views/{id}` | personal owner only; publishing a view requires `config.general` |
 | `GET /workspace/integrations` | `assets.remote` (canonical sensitive check) or `config.integrations` |
@@ -149,3 +149,7 @@ api.include_router(create_dashboard_router())
 No settings or task queue changes are required. Frontend hydration of the
 branding/integration values uses the same response fields already mapped by the
 original configuration store.
+
+## Client restoration boundary
+
+Shortcut DTOs are revalidated with the existing HTTP(S)/no-credentials normalizer before hydration and after shortcut writes. Invalid links are not rendered; shared-link visibility does not grant edit ownership. Snapshot restoration copies only own fields in each view's existing `workspaceFields`. Inventory accepts only captured prefs/filter/status/location/selection fields. It does not assign methods, component controls, arbitrary root preferences or inherited fields, and does not deep-merge nested objects. Saved map/graph layouts and live shared explorer filters retain their previous precedence.

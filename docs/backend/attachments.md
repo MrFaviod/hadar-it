@@ -3,8 +3,8 @@
 Attachments store metadata in `asset_attachments` and bytes outside the main SQL
 DB through `BlobStorage`. The default local adapter uses opaque keys under
 `ITSM_ATTACHMENT_STORAGE_PATH` (default `/data/attachments`). Mount a persistent
-volume there for both API and worker processes; root Compose integration follows
-in Phase 6. No external storage provider is required. Existing photo/fov image
+volume there for both API and worker processes; the root Compose file mounts it
+for both. No external storage provider is required. Existing photo/fov image
 endpoints retain their independent 1 MiB SQL-backed contract.
 
 ## HTTP

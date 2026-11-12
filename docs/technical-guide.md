@@ -1,8 +1,10 @@
-# Hadar IT: technical guide
+# Technical guide
 
-[Project overview](../README.md) · [Install the whole application](../INSTALL.md)
+[Project overview](../README.md) · [Install the whole application](../INSTALL.md) · [All documentation](README.md)
 
-This is the engineering map, not an extra installation checklist. Hadar IT is an **alpha**; configuration support and isolated tests do not certify a production deployment.
+How Hadar IT is built, what each capability needs before it works, and where to go next for operations and development. It is a map, not an installation checklist: to get a running instance, use the [installation guide](../INSTALL.md).
+
+Hadar IT is **alpha**. Configuration support and isolated tests do not certify a production deployment.
 
 ## How the pieces fit
 
@@ -106,6 +108,6 @@ Component setup and test prerequisites: [frontend development](frontend/developm
 
 ## Identity and licensing
 
-**Hadar IT** is the temporary official name. Its tagline is **Bring your own department.** The visible installation name is configurable in **Configuración → Apariencia**; changing that name does not require renaming packages, database objects or storage paths. Preserve installation-specific names.
+**Hadar IT** is the current product name, with the tagline **Bring your own department.** The visible installation name is configurable in **Settings → Appearance**; changing that name does not require renaming packages, database objects or storage paths. Preserve installation-specific names.
 
-The root project is distributed under [MIT](../LICENSE). Backend packaging still declares `LicenseRef-Proprietary`; that metadata discrepancy must be resolved before a release. This documentation change does not silently alter licensing metadata.
+The root project is distributed under [MIT](../LICENSE). Backend packaging still declares `LicenseRef-Proprietary`; that metadata discrepancy must be resolved before a release. Documentation does not change licensing metadata.
