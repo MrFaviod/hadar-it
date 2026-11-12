@@ -67,6 +67,11 @@ The directory is assembled as `.partial-<id>` and moved into place with
 and the manifest are `0600`, every archived extension file is `0600` and the
 artifact, extension and module directories are `0700`.
 
+Restore admits only this extension layout, checks every source/destination ancestor
+for existing symlinks before writing, and refuses invalid layouts before a combined
+core/extension restore changes the core. This preflight is not protection against
+a hostile concurrent filesystem writer; restore requires exclusive local ownership.
+
 `manifest.json`:
 
 ```json
@@ -156,6 +161,10 @@ Per-engine mechanism:
 | PostgreSQL | `pg_dump --format=custom` | recorded/installed client-major check plus a bounded trial restore into a throwaway database | `pg_restore --exit-on-error --no-owner --no-privileges` into the target |
 | MySQL / MariaDB | `mysqldump`/`mariadb-dump --single-transaction --quick --skip-lock-tables --routines --events` | dump completion marker plus checksum | client reading the dump on stdin |
 | SQL Server | `BACKUP DATABASE … WITH INIT, COMPRESSION, CHECKSUM` via `sqlcmd` | `RESTORE VERIFYONLY … WITH CHECKSUM` | `RESTORE DATABASE … WITH REPLACE, RECOVERY` (MOVE clauses optional) |
+
+SQL Server database identifiers are bracket-delimited with embedded `]` doubled;
+string literals retain single-quote escaping. This is command-construction evidence,
+not live SQL Server certification.
 
 ### PostgreSQL client major must match the server
 

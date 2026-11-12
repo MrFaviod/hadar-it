@@ -221,3 +221,12 @@ inspector: a remote receipt (including its `profileSafetyVerified`, `verified`
 and `profile.safety` fields) is never authoritative and must not self-certify.
 The importing caller must independently run authenticated engine inspection for
 the validated target/config digest, or record the installation as `configured`.
+
+### Local file boundary
+
+Hermes skill inventory never reads a `SKILL.md` whose resolved file is outside
+the selected skills root; it disables that entry by directory name instead.
+Rollback rechecks containment before parent creation, restoration, removal and
+created-directory cleanup. If the tree was redirected, rollback refuses rather
+than touching the external target; local manual recovery may be needed. These
+checks reject existing redirection, not a TOCTOU-proof hostile-writer sandbox.

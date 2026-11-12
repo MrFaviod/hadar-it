@@ -120,9 +120,18 @@ match the Compose server image and the only pairing this recipe is written for.
 These build-time checks are
 fail-closed, and the shipped shell fragments have executable regression tests.
 
+No image build or live archive/restore probe was executed by this verification;
+recipe checks do not certify engine compatibility.
+
 Honest limits: the closure is whatever `ldd` resolves inside that donor image,
 which is not a proof of full OS dependency reproducibility, and the `ldd`/version
 checks are only proven by an actual build. Mixing this tree with a different
 distribution or libc is unsupported; both stages are Debian bookworm by design.
 MySQL/MariaDB dump compatibility must still be exercised, and MSSQL requires a
 separately supplied licensed sqlcmd/ODBC variant.
+
+## HTTP response policy (diagnostic CSP)
+
+Both `frontend/nginx.conf` (plain HTTP) and `deploy/nginx-tls.conf` (optional TLS edge) emit the same `nosniff`, `same-origin` Referrer-Policy, `SAMEORIGIN` framing and `Content-Security-Policy-Report-Only` headers with `always`, including error responses. The outer TLS proxy hides duplicate upstream copies of those four headers; the frontend also hides upstream copies for API responses. Resource-specific backend **enforcing** CSP is not hidden or replaced. HSTS remains only on the TLS listener.
+
+The CSP is **Report-Only, not enforcement**. It permits same-origin assets/connects, inline styles, passive data/blob/HTTPS images, self/blob frames and self/blob workers, and excludes objects and `unsafe-eval`. The host's Vue runtime template compiler may report eval violations; this host response header does not block it. The isolated extension document has a separate **enforcing meta CSP**, with no `unsafe-eval`: that policy does block runtime template compilation. Fixed kit components use render functions; isolated modules must supply render functions (authored or precompiled), and raw templates are rejected with a visible translated error before mount. This explicitly replaces the formerly documented but CSP-blocked raw-template example; no eval exception or host compiler is added. There is no reporting endpoint or claim of zero violations. Evaluate browser reports and intentional external resources before a separately authorized enforcement rollout; do not silently add `unsafe-eval`. Configuration-contract tests are not a live nginx/TLS deployment certification.

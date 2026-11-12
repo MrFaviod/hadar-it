@@ -17,10 +17,11 @@ automatic migration and no new HTTP route.
   process cannot reset a production database over the network.
 - The canonical migrations run by the tool itself (`init`, `reset`). The API and
   worker still expect migrations to have been applied explicitly.
-- Attachment and task state must live inside a directory whose name contains
-  `dev`, or inside `ITSM_DEV_DATA_DIR`.
-- The dev administrator password comes from `ITSM_DEV_ADMIN_PASSWORD` or, when
-  that variable is empty, is generated and printed once on stdout.
+- Existing attachment and task state must resolve strictly inside the explicit
+  `ITSM_DEV_DATA_DIR`; directory names containing `dev` grant no deletion authority.
+- The dev administrator password comes from `ITSM_DEV_ADMIN_PASSWORD` or a hidden,
+  repeated terminal prompt. Non-interactive init/reset without that input refuse
+  before side effects; no password is returned in JSON or logs.
 
 ```bash
 export RELEASE_MODE=dev
@@ -120,7 +121,7 @@ The destructive commands run these gates in order, all **before** any change:
 | 3 | Deployment identity row exists and is `dev` | claimed only when the database is empty/unmarked | reported only | required |
 | 4 | `--yes-reset-dev-database` | — | — | required |
 | 5 | `--confirm <database-name-or-file-basename>` matches the target | — | — | required |
-| 6 | Attachment/task paths inside a `dev` directory or `ITSM_DEV_DATA_DIR` | — | reported in `reset.reasons` | required |
+| 6 | Existing attachment/task paths strictly inside explicit `ITSM_DEV_DATA_DIR` | — | reported in `reset.reasons` | required |
 
 Consequences:
 
@@ -209,6 +210,7 @@ reference rows.
   installed on this host.
 - **No automatic reset.** There is no scheduler, no timer and no per-visitor
   isolation: the development database is shared and resets are manual.
-- **A generated password is printed once.** It is on stdout only, but redirecting
-  that output or reading it from a log leaks it; prefer
-  `ITSM_DEV_ADMIN_PASSWORD`.
+- **Passwords are input, not output.** Automation must supply
+  `ITSM_DEV_ADMIN_PASSWORD`; interactive use prompts without echo. Existing
+  symlink escapes are refused during reset preflight, but a hostile concurrent
+  local writer replacing filesystem entries is outside this CLI boundary.

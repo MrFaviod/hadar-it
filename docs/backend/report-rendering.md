@@ -1,6 +1,6 @@
 # Report rendering engine
 
-The Phase 9 report engine turns authorized, already-projected data into four
+The report engine turns authorized, already-projected data into four
 artifacts with one **structured** pipeline and no browser-provided authority:
 
 1. preview HTML (server-composed, resource bytes embedded as data URIs only for
@@ -209,3 +209,8 @@ svg = qr_svg(url)  # Segno, error correction M, border=4 modules, scale=4
 The public share token is a separate, single-use-revealed secret. A stored
 share hash cannot be reversed into a URL; QR/share metadata must never
 reconstruct or invent a token. Public links are `/#/reporte/<uuid>/publico?share=<token>`.
+
+The translated pagination footer is encoded as a CSS string inside the HTML
+style element: control characters, quotes, backslashes and angle brackets are
+literal escapes. Only `{current}` and `{total}` become page counters; translations
+cannot close the style element or introduce a CSS newline.
