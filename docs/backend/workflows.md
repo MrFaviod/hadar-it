@@ -1,6 +1,6 @@
 # Workflows
 
-This document describes the workflow API and its limits. It is not a production certification.
+The server API for import analysis, approved previews, queued execution, exports and individual warranties, and its limits. It is not a production certification.
 
 ## Import analysis
 
@@ -16,13 +16,15 @@ The permanent asset UUID is the only automatic update match. Unknown supplied UU
 
 `POST /bulk/preview` fixes an explicit `assetIds` selection or supported nonempty filters, action, changed values and the current version of each target. Actions are `update`, `archive`, `transfer`, `assign` and `return`. Only selected fields are changed. Export uses `/assets/export` separately.
 
-`GET /operations/{id}` returns bounded rows, progress, summary, state and a queue job identifier when present. `/resolve` changes an import row and invalidates its prior approval. `/approve` is restricted to a currently authorized human, with unresolved conflicts rejected. Machines cannot approve their own operation.
+`GET /operations/{id}` returns bounded rows, progress, summary, state and a queue job identifier when present. UUIDs are locators, not shared access: another human receives `404` even with inventory permissions. The owner controls its preview. A machine owner's persisted human delegator may read, resolve and approve that proposal. `/resolve` invalidates prior approval; `/approve` requires a currently authorized human and rejects unresolved conflicts. Machines cannot approve.
+
+For human→machine execution, the machine must be explicitly delegated to that human in the existing identity record, and that human must own and have approved the fixed preview. Only then may the machine read, enqueue or execute it; it cannot resolve/change the human's rows. Undelegated machines and other humans are not collaborators by default. Existing operations keep their owner and approval; former UUID-only sharing must use this persisted delegation or prepare a new owner-local preview. Inventory itself remains installation-global.
 
 `/execute` uses the same canonical inventory services as direct HTTP mutations and agent tools. The approved human and current executor must still have the relevant permissions. Target versions are checked again before mutation. Each row has a durable result receipt; successful rows are not replayed. A stale or invalid row can fail while other rows succeed. Each changed asset retains its own history. Approval is not an authorization bypass.
 
 ## Huey execution
 
-`POST /operations/{id}/enqueue` requires the same fixed approval and returns HTTP 202 with an operation and job locator. The existing Huey adapter dispatches only a fixed business function with the SQL operation ID; there is no additional queue system. API and worker must share main SQL configuration and task storage. The executor session or machine credential must remain valid, and current authority is rechecked on execution.
+`POST /operations/{id}/enqueue` requires the same fixed approval and returns HTTP 202 with an operation and job locator. The existing Huey adapter dispatches only a fixed business function with the SQL operation ID; there is no additional queue system. API and worker must share main SQL configuration and task storage. The executor session or exact machine credential must remain unrevoked and unexpired, and current authority and the persisted owner/delegation frontier are rechecked on execution. Changing the delegator invalidates the former handoff; a stale approver is not an access grant.
 
 The operation SQL records provide business progress. Huey task results alone are not proof that a row was applied. Dispatch uses a conditional SQL state claim; a missing queue dispatch can reuse the stored job locator. Failure marking does not regress an operation already completed. Trusted source and executor authority are captured server-side, never from request fields.
 
@@ -30,7 +32,7 @@ Queue storage failures return a sanitized HTTP 503 and leave the persisted opera
 
 ## Export
 
-`POST /assets/export` accepts an explicit selection or supported filters and allowlisted fields. It returns real CSV bytes, always including permanent IDs first. Optional `options` support named `separator` (`comma`, `semicolon`, `tab`, `pipe`), strict boolean `headerRow`, `bom` and `includeEmpty`. Defaults preserve comma/header/BOM/all columns; `includeEmpty: false` drops wholly empty columns except the permanent ID. `filters: {"all": true}` selects the entire bounded inventory, including archived records; other filters and explicit IDs remain supported. Values that could be interpreted as spreadsheet formulas are neutralized. It does not return CSV under an XLSX filename. Genuine XLSX export is not currently implemented.
+`POST /assets/export` accepts an explicit selection or supported filters and allowlisted fields. It returns real CSV bytes, always including permanent IDs first. Optional `options` support named `separator` (`comma`, `semicolon`, `tab`, `pipe`), strict boolean `headerRow`, `bom` and `includeEmpty`. Defaults preserve comma/header/BOM/all columns; `includeEmpty: false` drops wholly empty columns except the permanent ID. `filters: {"all": true}` selects the entire bounded inventory, including archived records; other filters and explicit IDs remain supported. Text beginning with `=`, `+`, `-`, `@`, whitespace (including U+0085 and U+FEFF), C0 (U+0000–001F), DEL (U+007F) or C1 (U+0080–009F) receives a literal apostrophe prefix. Actual numeric values, including negative decimals, retain their numeric spelling; numeric-looking text remains text. CSV quoting preserves delimiters, quotes and CR/LF. The frontend panel and transfer downloads share the same typed writer; report CSV reuses the backend export cell rule, including headers. Safe text/numeric CSV can roundtrip through import preview. The apostrophe is intentional exported data for dangerous text: generic CSV import does not strip it or promise byte-identical roundtrip for neutralized text. No spreadsheet application execution was certified. It does not return CSV under an XLSX filename. Genuine XLSX export is not currently implemented.
 
 ## Individual warranties
 

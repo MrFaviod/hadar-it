@@ -1,7 +1,7 @@
-# Identity, authentication and authorization (phase 2)
+# Identity, authentication and authorization
 
-Phase 2 turns the prototype login simulation into a real identity boundary. It is
-still a modular monolith: the identity module lives inside the same FastAPI app,
+The identity module replaced the prototype login simulation with a real identity
+boundary. The backend is a modular monolith: the identity module lives inside the same FastAPI app,
 uses the same SQLAlchemy session and ships one new migration. No external
 identity provider, broker or policy server is introduced.
 
@@ -12,7 +12,7 @@ orchestration and other business modules. The existing identity UI is integrated
 
 For personal human API keys, see [issuance, expiry, revocation and intentional
 public routes](personal-api-keys.md). REST and MCP share the same central
-identity authority; existing machine credentials remain supported unchanged.
+identity authority; machine credentials retain their token format with the bounded lifetime and transition below.
 
 ## Layout
 
@@ -24,7 +24,7 @@ identity authority; existing machine credentials remain supported unchanged.
 | `itsm/identity/policy.py` | Casbin model text, policy loading from the SQL rows and the narrow `PolicyEngine` API |
 | `itsm/identity/service.py` | Business rules: login, sessions, principals, delegation, administration, authorization and audit |
 | `itsm/identity/api.py` | FastAPI router, cookie/CSRF/origin guards and error handlers |
-| `itsm/identity/cli.py` | Installation commands (`bootstrap-superadmin`, `adopt-superadmin`, `create-machine-identity`, `revoke-machine-token`) |
+| `itsm/identity/cli.py` | Installation commands (`bootstrap-superadmin`, `adopt-superadmin`, `create-machine-identity`, `rotate-machine-token`, `revoke-machine-token`) |
 | `migrations/versions/0002_identity.py` | Tables, indexes and the seeded role grant tables |
 | `migrations/versions/0021_system_profiles.py` | Installs the superadmin/admin/user profiles, migrates existing readers to `user` and adds the persisted role owner |
 
@@ -52,7 +52,9 @@ JSON, enum or UUID column is used, so the schema avoids deliberately engine-spec
   `expires_at` and `revoked_at` live here, so expiry and revocation are checked
   on every request.
 - `identity_credentials` — bearer token digests for machine identities, with an
-  issuance label and `revoked_at`.
+  issuance label, mandatory `expires_at` and `revoked_at`. New credentials last
+  90 days; authentication and queued workflow/report execution reject them at
+  the exact expiry boundary.
 - `identity_login_attempts` — durable, bounded login throttling records.
 - `identity_security_settings` — the single settings row (currently
   `session_minutes`, default 480).
@@ -258,7 +260,10 @@ loads the session timer).
   --username agent.collector --name 'Collector' \
   --actor-kind internal_agent --role user
 
-# 4. Revoke every active machine credential of an identity
+# 4. Rotate atomically: revoke all old credentials and print a 90-day replacement
+.venv/bin/python -m itsm.identity.cli rotate-machine-token --username agent.collector
+
+# 5. Revoke every active machine credential of an identity
 .venv/bin/python -m itsm.identity.cli revoke-machine-token --username agent.collector
 ```
 
@@ -269,6 +274,33 @@ refuses when no active human superadmin exists, when the requested role is
 `admin`/`superadmin`, or when a role carrying reserved grants lacks
 `--delegated-by` naming an active human superadmin. There is no default
 credential, no startup bootstrap, no web self-elevation and no `.env` file.
+
+These commands trust the local operator's process/database access. They are not
+HTTP-authenticated operations: `--delegated-by` selects a persisted delegation,
+not proof that the named human logged in. Audit attributes bootstrap, adoption,
+machine creation, issuance, rotation and revocation to `local_operator` with no
+human actor id/username. The target remains the resource and the persisted
+machine delegator is recorded separately. No `--actor` label can establish identity.
+
+### Machine credential transition and rollback
+
+Apply `0045_machine_expiry` explicitly with API and worker stopped on the old
+release. It adds the single indispensable `expires_at` field and assigns existing
+credentials one 90-day grace window measured from migration time, including old
+credentials that would otherwise be immediately expired by age. Digests, identity
+links and revocation state are preserved; no secret is recovered or rewritten.
+Rotate during this window. Creation/rotation JSON includes `credentialId` and
+`expiresAt`; token output remains one-time. Rotation revokes all older tokens and
+issues the replacement in the same transaction. No extra configuration,
+dependency, scheduler or refresh-token protocol is introduced.
+
+A downgrade to `0044_personal_api_keys` removes only the expiry column; it preserves
+digests and revocations, but **old application code no longer enforces expiry**.
+It is not a security-equivalent rollback. Do not downgrade schema under running
+new code. Re-upgrade starts a new legacy grace window; use explicit revocation
+before rollback when retaining a token would be unsafe. Verification uses only
+disposable databases; PostgreSQL/MariaDB execution needs separate disposable
+engine evidence, and SQL Server is not certified.
 
 ## Configuration
 
@@ -301,3 +333,7 @@ passwords, tokens, digests or request payloads.
   permissions, attribute policies or approval workflows are implemented.
 - Agents are identities and credentials only: no agent runtime, tool framework or
   autonomous behavior exists.
+
+## Account form ceiling
+
+The client chooses the first assignable role (or none) for a new account and rechecks it on submission and at the save adapter. Missing or no-longer-assignable roles are rejected before transport using the existing role-field error. These presentation checks do not replace the server's effective-permission ceiling, last-admin or self-role safeguards.

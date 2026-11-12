@@ -11,7 +11,7 @@ Apply the explicit Alembic migration `0044_personal_api_keys` through the normal
 operator upgrade procedure before running this code. Startup never migrates.
 Existing machine credentials are unchanged. This migration adds a separate
 `identity_api_keys` table; it does not rewrite identities, sessions or machine
-credentials. This change was exercised on disposable SQLite only, not live
+credentials. Personal API keys have been exercised on disposable SQLite only, not live
 PostgreSQL, MariaDB or SQL Server.
 
 1. Sign in with `POST /api/v1/auth/login`, your username/password and the configured
