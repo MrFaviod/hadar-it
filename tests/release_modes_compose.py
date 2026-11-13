@@ -79,6 +79,14 @@ def main():
             assert "/tmp" in str(setup["tmpfs"])
             assert setup["environment"]["RELEASE_MODE"] == mode
             assert setup["environment"]["ITSM_SETUP_STATE_DIR"] == "/var/lib/itsm-setup"
+            # The backend image has no /var/lib/itsm-setup directory, so Docker
+            # creates the named volume root-owned. Only its owner can chmod it to
+            # 0700 with every capability dropped, so the wizard owns the volume.
+            assert setup.get("user") == "0:0", "the wizard must own its state volume"
+            if mode == "prod":
+                assert setup["environment"]["ITSM_SETUP_ALLOWED_ORIGINS"] == (
+                    "https://test.invalid"
+                ), "production pins the exact https origin the wizard validates"
             assert [mount["target"] for mount in setup["volumes"]] == ["/var/lib/itsm-setup"]
             assert all(mount["type"] == "volume" for mount in setup["volumes"])
             assert "docker.sock" not in json.dumps(setup)
