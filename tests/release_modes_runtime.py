@@ -175,6 +175,10 @@ def _mode_environment(mode: str, api_port: int, frontend_port: int, dev_password
         # Fresh, project-owned SQLite file: the only engine this environment can
         # prove without contacting a shared server.
         env["ITSM_DATABASE_URL"] = PROD_DATABASE_URL
+        # Production refuses to render without the public origins; the edge
+        # under test is that origin here.
+        env["ITSM_REPORT_BASE_URL"] = _origin(frontend_port)
+        env["ITSM_MONITORING_PUBLIC_URL"] = _origin(frontend_port)
     return env
 
 
