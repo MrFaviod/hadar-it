@@ -163,8 +163,9 @@ services:
   # database and the API are absent, so it never waits on them and never imports
   # a module that opens the database. Its only prerequisite is the one-shot
   # volume initializer below. It is not published on the host; the frontend edge
-  # proxies /api/setup/v1/ to it on the Compose network. Its only writable state
-  # is the private volume below.
+  # proxies /api/setup/v1/ to it on the Compose network. Its writable state is
+  # the private volume below plus the queue and attachment volumes it verifies
+  # against the worker.
   #
   # Docker creates that named volume root-owned (0755) because the image ships
   # no /var/lib/itsm-setup directory. `setup-volume-init` fixes ownership in a
@@ -223,9 +224,26 @@ services:
       # before a database exists. When unset the AI step reports the missing key
       # instead of silently disabling the provider form.
       ITSM_AI_CREDENTIAL_KEYS: ${ITSM_AI_CREDENTIAL_KEYS:-}
+      # Verification observes what the worker will use, so setup resolves the
+      # same queue and the same attachment directory as the API and the worker.
+      # With private paths it would enqueue the setup ping where no worker
+      # looks and probe a directory that does not exist: verify then reports
+      # worker_ready unknown and that storage is not writable.
+      ITSM_TASK_STORAGE: ${ITSM_TASK_STORAGE:-sqlite}
+      ITSM_TASK_SQLITE_PATH: /data/tasks/huey.db
+      ITSM_TASK_REDIS_URL: ${ITSM_TASK_REDIS_URL:-redis://redis:6379/0}
+      ITSM_TASK_POSTGRES_DSN: ${ITSM_TASK_POSTGRES_DSN:-}
+      ITSM_ATTACHMENT_STORAGE_PATH: /data/attachments
     volumes:
       - setup-state:/var/lib/itsm-setup
       - installation-config:/data/installation
+      # Shared with the worker on purpose: the setup ping is a real task in this
+      # queue and the storage probe is a real file in this directory. The image
+      # already ships both paths as 10001:10001, so an empty named volume
+      # inherits that ownership; the wizard needs no capability and
+      # setup-volume-init stays scoped to the two volumes above.
+      - task-data:/data/tasks
+      - attachment-data:/data/attachments
     security_opt:
       - "no-new-privileges:true"
       # The setup state volume is shared with later operator commands, so it

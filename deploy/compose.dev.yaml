@@ -54,5 +54,15 @@ services:
     environment: *dev-environment
     <<: *dev-volumes
 
+  # The wizard verifies what the worker will see: the queue file, the
+  # attachment directory and the local database all live on dev-data, so setup
+  # mounts that volume instead of the inherited task/attachment volumes.
+  setup:
+    environment:
+      ITSM_TASK_STORAGE: sqlite
+      ITSM_TASK_SQLITE_PATH: /data/dev/tasks/huey.db
+      ITSM_ATTACHMENT_STORAGE_PATH: /data/dev/attachments
+    volumes: !override [setup-state:/var/lib/itsm-setup, installation-config:/data/installation, dev-data:/data/dev]
+
 volumes:
   dev-data:

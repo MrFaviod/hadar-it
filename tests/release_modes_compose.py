@@ -174,11 +174,40 @@ def main():
                 assert setup["environment"]["ITSM_SETUP_ALLOWED_ORIGINS"] == (
                     "https://test.invalid"
                 ), "production pins the exact https origin the wizard validates"
+            # The wizard verifies what the worker sees: it enqueues a real setup
+            # ping onto the worker's queue and writes a real probe into the
+            # attachment directory, so both services must resolve the same
+            # paths on the same volumes. Private paths cannot pass verify on an
+            # installed system (worker_ready unknown, storage not writable).
+            shared = ("/data/dev",) if mode == "dev" else ("/data/tasks", "/data/attachments")
             assert [mount["target"] for mount in setup["volumes"]] == [
                 "/var/lib/itsm-setup",
                 INSTALLATION_DIR,
-            ]
+                *shared,
+            ], setup["volumes"]
             assert all(mount["type"] == "volume" for mount in setup["volumes"])
+            worker = services["worker"]
+            worker_mounts = {mount["target"]: mount for mount in worker["volumes"]}
+            setup_mounts = {mount["target"]: mount for mount in setup["volumes"]}
+            for key in ("ITSM_TASK_SQLITE_PATH", "ITSM_ATTACHMENT_STORAGE_PATH"):
+                path = setup["environment"][key]
+                assert path == worker["environment"][key], (
+                    f"{mode}: setup and the worker disagree on {key}"
+                )
+                target = (
+                    "/data/dev"
+                    if mode == "dev"
+                    else ("/data/tasks" if key == "ITSM_TASK_SQLITE_PATH" else "/data/attachments")
+                )
+                assert path == target or path.startswith(target + "/"), (
+                    f"{mode}: {path} is outside {target}"
+                )
+                assert setup_mounts[target]["source"] == worker_mounts[target]["source"], (
+                    f"{mode}: setup and the worker mount different volumes on {target}"
+                )
+                assert not setup_mounts[target].get("read_only"), (
+                    f"{mode}: setup writes {target} while verifying"
+                )
             assert "docker.sock" not in json.dumps(setup)
             # One shared settings volume: setup is its only writer, so it is the
             # only service that mounts it read-write. The API, the worker and the
