@@ -492,9 +492,14 @@ def _check_render(model: dict, mode: str, project: str, api_port: int, frontend_
             f"{mode}: the volume initializer holds only CHOWN and FOWNER",
         )
         setup_mounts = _mount_targets(setup)
+        # Verification observes what the worker will use: setup enqueues a real
+        # setup ping onto the worker's queue and writes a real probe into the
+        # attachment directory, so its private state and settings volumes are
+        # joined by the mode-owned queue and attachment targets.
+        shared = ("/data/dev",) if mode == "dev" else ("/data/tasks", "/data/attachments")
         _expect(
-            set(setup_mounts) == {"/var/lib/itsm-setup", INSTALLATION_DIR},
-            f"{mode}: setup writes only its private volumes",
+            set(setup_mounts) == {"/var/lib/itsm-setup", INSTALLATION_DIR, *shared},
+            f"{mode}: setup mounts its private volumes and the data it verifies",
         )
         installation_mount = setup_mounts.get(INSTALLATION_DIR)
         _expect(
@@ -502,6 +507,22 @@ def _check_render(model: dict, mode: str, project: str, api_port: int, frontend_
             and installation_mount.get("read_only") is not True,
             f"{mode}: setup is the only writer of the installation settings",
         )
+        worker_mounts = _mount_targets(services["worker"])
+        for target in shared:
+            mount = setup_mounts[target]
+            _expect(
+                mount.get("type") == "volume"
+                and mount.get("read_only") is not True
+                and str(mount.get("source"))
+                == str(worker_mounts.get(target, {}).get("source")),
+                f"{mode}: setup writes {target} on the worker's volume",
+            )
+        for key in ("ITSM_TASK_SQLITE_PATH", "ITSM_ATTACHMENT_STORAGE_PATH"):
+            path = setup.get("environment", {}).get(key)
+            _expect(
+                path == services["worker"].get("environment", {}).get(key),
+                f"{mode}: setup and the worker agree on {key}",
+            )
         _expect(
             setup.get("environment", {}).get("ITSM_INSTALLATION_CONFIG")
             == INSTALLATION_FILE,
