@@ -1,6 +1,7 @@
 """Read-only Compose rendering contract; no containers, builds or downloads."""
 import json
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -31,6 +32,33 @@ def render(mode):
     result = compose(mode)
     assert result.returncode == 0, result.stderr
     return json.loads(result.stdout)
+
+
+def assert_variable_proxy_pass_keeps_the_uri():
+    """Every variable proxy_pass must append $request_uri.
+
+    nginx treats a URI inside a variable proxy_pass as the complete upstream
+    URI; a variable with no path forwards the request as "/", so the wizard and
+    the API would answer from the wrong path. Both edge configs share the rule.
+    """
+    pattern = re.compile(r"^\s*proxy_pass\s+([^;]+);")
+    checked = 0
+    for path in (ROOT / "deploy" / "nginx-tls.conf", ROOT / "frontend" / "nginx.conf"):
+        assert path.is_file(), f"missing edge config {path}"
+        for number, line in enumerate(path.read_text().splitlines(), 1):
+            match = pattern.match(line)
+            if match is None:
+                continue
+            target = match.group(1).strip()
+            if "$" not in target:
+                continue
+            checked += 1
+            assert target.endswith("$request_uri"), (
+                f"{path.name}:{number}: variable proxy_pass must append "
+                f"$request_uri (got {target})"
+            )
+    assert checked >= 4, f"expected four variable proxy_pass targets, found {checked}"
+    print(f"PASS edge configs keep the request URI on {checked} variable proxy_pass targets")
 
 
 def main():
@@ -113,6 +141,8 @@ def main():
         result = compose("prod", omit=(name,))
         assert result.returncode != 0 and name in result.stderr, result.stderr
     print("PASS prod refuses to start without its public URLs")
+
+    assert_variable_proxy_pass_keeps_the_uri()
 
 
 if __name__ == "__main__":
