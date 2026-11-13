@@ -1,0 +1,571 @@
+{
+  "contract": "itsm-setup-onboarding",
+  "contract_version": 1,
+  "modes": ["dev", "prod"],
+  "states": [
+    "unclaimed",
+    "claimed",
+    "ai_configured",
+    "ai_deferred",
+    "storage_ready",
+    "owner_ready",
+    "configuring",
+    "verifying",
+    "complete"
+  ],
+  "initial_state": "unclaimed",
+  "terminal_state": "complete",
+  "transitions": [
+    {
+      "from": "unclaimed",
+      "to": "claimed",
+      "trigger": "operator presents the one-time claim credential",
+      "actor": "claim",
+      "via": "claim",
+      "recovery": false
+    },
+    {
+      "from": "claimed",
+      "to": "ai_configured",
+      "trigger": "provider endpoint, model and tool call verified before any database exists",
+      "actor": "session",
+      "via": "configure_ai",
+      "recovery": false
+    },
+    {
+      "from": "claimed",
+      "to": "ai_deferred",
+      "trigger": "operator chooses manual continuation after an AI failure (D1)",
+      "actor": "session",
+      "via": "defer_ai",
+      "recovery": false
+    },
+    {
+      "from": "ai_configured",
+      "to": "storage_ready",
+      "trigger": "database reachable, migrated and prepared",
+      "actor": "session",
+      "via": "apply_storage",
+      "recovery": false
+    },
+    {
+      "from": "ai_deferred",
+      "to": "storage_ready",
+      "trigger": "database reachable, migrated and prepared with AI still pending",
+      "actor": "session",
+      "via": "apply_storage",
+      "recovery": false
+    },
+    {
+      "from": "storage_ready",
+      "to": "owner_ready",
+      "trigger": "first superadmin bootstrapped through identity.service",
+      "actor": "session",
+      "via": "bootstrap_owner",
+      "recovery": false
+    },
+    {
+      "from": "owner_ready",
+      "to": "configuring",
+      "trigger": "operator starts the assisted configuration pass",
+      "actor": "session",
+      "via": "start_configuration",
+      "recovery": false
+    },
+    {
+      "from": "configuring",
+      "to": "verifying",
+      "trigger": "every required check for the mode reports its result",
+      "actor": "session",
+      "via": "verify",
+      "recovery": false
+    },
+    {
+      "from": "verifying",
+      "to": "complete",
+      "trigger": "required results verified and bootstrap mutation disabled",
+      "actor": "session",
+      "via": "complete",
+      "recovery": false
+    },
+    {
+      "from": "complete",
+      "to": "configuring",
+      "trigger": "operator explicitly reopens configuration from the local CLI",
+      "actor": "operator_cli",
+      "via": "recover",
+      "recovery": true
+    }
+  ],
+  "operations": [
+    {
+      "id": "status",
+      "method": "GET",
+      "path": "/api/setup/v1/status",
+      "required_states": [
+        "unclaimed",
+        "claimed",
+        "ai_configured",
+        "ai_deferred",
+        "storage_ready",
+        "owner_ready",
+        "configuring",
+        "verifying",
+        "complete"
+      ],
+      "auth": "anonymous",
+      "read_only": true,
+      "idempotent": true,
+      "returns": [
+        "state",
+        "mode",
+        "release_mode",
+        "setup_enabled",
+        "claim_available",
+        "backend",
+        "version",
+        "instance_id"
+      ]
+    },
+    {
+      "id": "claim",
+      "method": "POST",
+      "path": "/api/setup/v1/claim",
+      "required_states": ["unclaimed"],
+      "auth": "claim",
+      "read_only": false,
+      "idempotent": false,
+      "origin_check": true,
+      "csrf": false
+    },
+    {
+      "id": "session",
+      "method": "GET",
+      "path": "/api/setup/v1/session",
+      "required_states": [
+        "claimed",
+        "ai_configured",
+        "ai_deferred",
+        "storage_ready",
+        "owner_ready",
+        "configuring",
+        "verifying"
+      ],
+      "auth": "session",
+      "read_only": true,
+      "idempotent": true,
+      "returns": ["state", "mode", "release_mode", "checks"]
+    },
+    {
+      "id": "configure_ai",
+      "method": "POST",
+      "path": "/api/setup/v1/ai",
+      "required_states": ["claimed", "ai_deferred"],
+      "auth": "session",
+      "read_only": false,
+      "idempotent": true,
+      "origin_check": true,
+      "csrf": true
+    },
+    {
+      "id": "defer_ai",
+      "method": "POST",
+      "path": "/api/setup/v1/ai/defer",
+      "required_states": ["claimed"],
+      "auth": "session",
+      "read_only": false,
+      "idempotent": true,
+      "origin_check": true,
+      "csrf": true
+    },
+    {
+      "id": "check_storage",
+      "method": "POST",
+      "path": "/api/setup/v1/storage/check",
+      "required_states": ["ai_configured", "ai_deferred"],
+      "auth": "session",
+      "read_only": false,
+      "idempotent": true,
+      "origin_check": true,
+      "csrf": true
+    },
+    {
+      "id": "apply_storage",
+      "method": "POST",
+      "path": "/api/setup/v1/storage",
+      "required_states": ["ai_configured", "ai_deferred"],
+      "auth": "session",
+      "read_only": false,
+      "idempotent": true,
+      "origin_check": true,
+      "csrf": true
+    },
+    {
+      "id": "bootstrap_owner",
+      "method": "POST",
+      "path": "/api/setup/v1/owner",
+      "required_states": ["storage_ready"],
+      "auth": "session",
+      "read_only": false,
+      "idempotent": true,
+      "origin_check": true,
+      "csrf": true
+    },
+    {
+      "id": "start_configuration",
+      "method": "POST",
+      "path": "/api/setup/v1/configuration",
+      "required_states": ["owner_ready"],
+      "auth": "session",
+      "read_only": false,
+      "idempotent": true,
+      "origin_check": true,
+      "csrf": true
+    },
+    {
+      "id": "verify",
+      "method": "POST",
+      "path": "/api/setup/v1/verify",
+      "required_states": ["configuring"],
+      "auth": "session",
+      "read_only": false,
+      "idempotent": true,
+      "origin_check": true,
+      "csrf": true
+    },
+    {
+      "id": "complete",
+      "method": "POST",
+      "path": "/api/setup/v1/complete",
+      "required_states": ["verifying"],
+      "auth": "session",
+      "read_only": false,
+      "idempotent": true,
+      "origin_check": true,
+      "csrf": true
+    }
+  ],
+  "operator_commands": [
+    {
+      "id": "recover",
+      "command": "python -m itsm.setup.cli recover",
+      "auth": "operator_cli",
+      "idempotent": true,
+      "preserves_owner": true,
+      "resets_database": false
+    },
+    {
+      "id": "enable-claim",
+      "command": "python -m itsm.setup.cli enable-claim",
+      "auth": "operator_cli",
+      "idempotent": true,
+      "preserves_owner": true,
+      "resets_database": false
+    },
+    {
+      "id": "rotate-claim",
+      "command": "python -m itsm.setup.cli rotate-claim",
+      "auth": "operator_cli",
+      "idempotent": false,
+      "preserves_owner": true,
+      "resets_database": false
+    }
+  ],
+  "claim_credential": {
+    "one_time": true,
+    "never_logged": true,
+    "never_in_url": true,
+    "source": "backend/itsm/deployment.py:40-44, backend/itsm/identity/cli.py:36-64"
+  },
+  "sanitized_status": {
+    "fields": [
+      "state",
+      "mode",
+      "release_mode",
+      "setup_enabled",
+      "claim_available",
+      "backend",
+      "version",
+      "instance_id",
+      "checks"
+    ],
+    "secrets_excluded": true,
+    "forbidden_tokens": ["password", "secret", "credential", "ciphertext", "api_key", "token", "dsn"],
+    "source": "backend/itsm/identity/api.py:373-392"
+  },
+  "settings_seam": {
+    "builder": "get_settings",
+    "resolver": "resolve_settings_sources",
+    "env_var": "ITSM_INSTALLATION_CONFIG",
+    "file_mode": "0600",
+    "directory_mode": "0700",
+    "precedence": ["env", "installation", "default"],
+    "tri_state": ["unset", "empty", "applied"],
+    "subprocess_projection": "tests/conftest.py:56 strips every ITSM_* variable, so the pointer keeps the ITSM_ prefix and a developer shell cannot leak an installation file into subprocesses",
+    "source": "backend/itsm/config.py:147-154, backend/itsm/config.py:752-754, backend/tests/conftest.py:56-96"
+  },
+  "settings": [
+    {
+      "key": "database_url",
+      "env": "ITSM_DATABASE_URL",
+      "owner": "installation",
+      "secret": true,
+      "precedence": ["env", "installation", "default"]
+    },
+    {
+      "key": "auth_origin",
+      "env": "ITSM_AUTH_ORIGIN",
+      "owner": "installation",
+      "secret": false,
+      "precedence": ["env", "installation", "default"]
+    },
+    {
+      "key": "auth_cookie_secure",
+      "env": "ITSM_AUTH_COOKIE_SECURE",
+      "owner": "installation",
+      "secret": false,
+      "precedence": ["env", "installation", "default"]
+    },
+    {
+      "key": "auth_cookie_name",
+      "env": "ITSM_AUTH_COOKIE_NAME",
+      "owner": "installation",
+      "secret": false,
+      "precedence": ["env", "installation", "default"]
+    },
+    {
+      "key": "auth_session_minutes_default",
+      "env": "ITSM_AUTH_SESSION_MINUTES_DEFAULT",
+      "owner": "installation",
+      "secret": false,
+      "precedence": ["env", "installation", "default"]
+    },
+    {
+      "key": "task_storage",
+      "env": "ITSM_TASK_STORAGE",
+      "owner": "installation",
+      "secret": false,
+      "precedence": ["env", "installation", "default"]
+    },
+    {
+      "key": "agent_model",
+      "env": "ITSM_AGENT_MODEL",
+      "owner": "installation",
+      "secret": false,
+      "precedence": ["env", "installation", "default"]
+    },
+    {
+      "key": "ai_credential_keys",
+      "env": "ITSM_AI_CREDENTIAL_KEYS",
+      "owner": "env",
+      "secret": true,
+      "precedence": ["env", "installation", "default"]
+    },
+    {
+      "key": "dev_admin_password",
+      "env": "ITSM_DEV_ADMIN_PASSWORD",
+      "owner": "env",
+      "secret": true,
+      "precedence": ["env", "installation", "default"]
+    },
+    {
+      "key": "release_mode",
+      "env": "RELEASE_MODE",
+      "owner": "env",
+      "secret": false,
+      "precedence": ["env", "installation", "default"]
+    },
+    {
+      "key": "monitoring_public_url",
+      "env": "ITSM_MONITORING_PUBLIC_URL",
+      "owner": "env",
+      "secret": false,
+      "precedence": ["env", "installation", "default"]
+    },
+    {
+      "key": "appearance_default_theme",
+      "env": "ITSM_APPEARANCE_DEFAULT_THEME",
+      "owner": "domain_service",
+      "secret": false,
+      "precedence": ["domain_service"]
+    },
+    {
+      "key": "smtp_host",
+      "env": "ITSM_SMTP_HOST",
+      "owner": "domain_service",
+      "secret": false,
+      "precedence": ["domain_service"]
+    },
+    {
+      "key": "backup_policy",
+      "env": "ITSM_BACKUP_POLICY",
+      "owner": "domain_service",
+      "secret": false,
+      "precedence": ["domain_service"]
+    }
+  ],
+  "ownership": {
+    "table": "deployment_identity",
+    "singleton": "id=1",
+    "first_owner": "bootstrap_superadmin",
+    "first_owner_source": "backend/itsm/identity/service.py:1304-1349",
+    "adopt_unmarked_nonempty": false,
+    "existing_database": "read_only",
+    "risk_source": "backend/itsm/release_identity.py:221-230 adopts an unmarked non-empty database in prod",
+    "recovery": "operator_cli",
+    "source": "backend/itsm/release_identity.py:83-91, backend/itsm/deployment.py:46-59"
+  },
+  "session": {
+    "cookie_name": "itsm_setup_session",
+    "cookie_path": "/api/setup/v1",
+    "http_only": true,
+    "same_site": "Strict",
+    "secure": "settings.auth_cookie_secure",
+    "origin_header": "Origin",
+    "csrf_header": "X-CSRF-Token",
+    "ttl_minutes": 60,
+    "max_attempts": 5,
+    "imports_identity_cookie_helpers": false,
+    "source": "backend/itsm/identity/api.py:46-49, 325-345, 373-392"
+  },
+  "provider": {
+    "key_ring_env": "ITSM_AI_CREDENTIAL_KEYS",
+    "scope": "personal",
+    "db_free": true,
+    "reuse": [
+      "seal_credential",
+      "unseal_credential",
+      "validate_provider_endpoint",
+      "ProviderNetworkPolicy",
+      "discover_provider_models"
+    ],
+    "blocked_without_key": true,
+    "transfer": ["verify_credential", "delete_transient_copy"],
+    "source": "backend/itsm/agent_integrations/providers.py:316-366, 459-537, 651-745"
+  },
+  "compose": {
+    "setup_service": "setup",
+    "port": 8100,
+    "port_state": "proposal",
+    "path_prefix": "/api/setup/v1",
+    "depends_on": [],
+    "demo_profile": "setup-excluded",
+    "nginx_resolver": "127.0.0.11",
+    "variable_proxy_pass": true,
+    "backend_absent_status": [502, 503],
+    "service_set_update_slice": "T1",
+    "source": "compose.yaml:123-170, frontend/nginx.conf:37-44, deploy/nginx-tls.conf:57-65, tests/release_modes_runtime.py:77-81"
+  },
+  "frontend": {
+    "branch_before": "mountLegacy",
+    "probe": "GET /api/setup/v1/status",
+    "probe_client": "frontend/src/setup/client.ts",
+    "files": [
+      "frontend/src/setup/SetupApp.tsx",
+      "frontend/src/setup/client.ts",
+      "frontend/src/main.tsx"
+    ],
+    "source": "frontend/src/main.tsx:8-10, frontend/src/legacy.ts:56-60, frontend/assets/js/access.js:717-738"
+  },
+  "docs_pack": {
+    "generator": "tools/build-project-context.py",
+    "output": "backend/itsm/project_context/pack.json",
+    "allowlist": [
+      "docs/README.md",
+      "docs/features.md",
+      "docs/technical-guide.md",
+      "docs/operations.md",
+      "docs/operations.es.md",
+      "docs/user-operations.md",
+      "docs/user-operations.en.md",
+      "docs/release-modes-deployment.md"
+    ],
+    "exclusions": ["odd/", "docs/reviews/", "AGENTS.md", ".env*"],
+    "drift_check": true,
+    "source": "backend/Dockerfile:19-20, backend/Dockerfile.ops:60"
+  },
+  "tools": {
+    "mandatory": [
+      "get_project_context",
+      "list_project_capabilities",
+      "search_project_docs",
+      "read_project_doc"
+    ],
+    "registration": ["backend/itsm/agents/runtime.py", "backend/itsm/mcp/server.py"],
+    "collision_check": "zero matches for the four names across the worktree on 2026-11-13",
+    "source": "backend/itsm/agents/runtime.py:76-134, backend/itsm/mcp/server.py:59-117"
+  },
+  "requirement_catalog": [
+    "setup_enabled",
+    "claim_completed",
+    "ai_explicit",
+    "database_ready",
+    "migrated",
+    "owner_present",
+    "origin_valid",
+    "session_valid",
+    "worker_ready",
+    "storage_ready",
+    "appearance_decided",
+    "backup_policy_declared",
+    "smtp",
+    "monitoring",
+    "external_search",
+    "external_engines",
+    "integrations"
+  ],
+  "requirements": {
+    "dev": {
+      "required": [
+        "setup_enabled",
+        "claim_completed",
+        "ai_explicit",
+        "database_ready",
+        "migrated",
+        "owner_present",
+        "origin_valid",
+        "worker_ready",
+        "storage_ready",
+        "appearance_decided"
+      ],
+      "postponable": [
+        "backup_policy_declared",
+        "smtp",
+        "monitoring",
+        "external_search",
+        "external_engines",
+        "integrations"
+      ]
+    },
+    "prod": {
+      "required": [
+        "setup_enabled",
+        "claim_completed",
+        "ai_explicit",
+        "database_ready",
+        "migrated",
+        "owner_present",
+        "origin_valid",
+        "session_valid",
+        "worker_ready",
+        "storage_ready",
+        "appearance_decided",
+        "backup_policy_declared"
+      ],
+      "postponable": [
+        "smtp",
+        "monitoring",
+        "external_search",
+        "external_engines",
+        "integrations"
+      ]
+    }
+  },
+  "recovery": {
+    "owner_preserved": true,
+    "resets_database": false,
+    "cookie_independent": true,
+    "commands": ["recover"],
+    "source": "backend/itsm/identity/cli.py:111-126"
+  }
+}
