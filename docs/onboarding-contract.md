@@ -9,7 +9,7 @@ Run the gate with `python3 tests/onboarding_contract.py`. It reads `tests/onboar
 - Setup is a separate application and CLI (`itsm.setup`). It never imports `itsm.main`, which opens the database during startup (`backend/itsm/main.py:257-259`), and it must answer while the database and the API are absent.
 - Only `dev` and `prod` participate. Demo keeps its current path and never offers a claim.
 - The wizard is reachable without a database. The setup service has no `depends_on` on `initialize` or `backend` (`compose.yaml:123-170`).
-- No Docker socket, no shell, no host edit, no root. Published on loopback like the rest of the stack.
+- No Docker socket, no shell, no host edit, no root, and no published host port: the wizard is reached only through the frontend edge (`/api/setup/v1/`).
 - Anonymous callers can read a sanitized status and nothing else. The claim credential, the session token and every secret stay out of logs, URLs and responses.
 
 ## States and transitions
@@ -141,7 +141,7 @@ Postponable in both modes, recorded as pending and never reported as ready: SMTP
 
 ## Compose and edge routing
 
-- New `setup` service, image `itsm-backend:0.1.0` with `command: python -m itsm.setup`, no dependency on `initialize` or `backend`, loopback publication, read-only root filesystem, dropped capabilities and SELinux level. Port `8100` is a proposal; nothing listens there today.
+- New `setup` service, image `itsm-backend:0.1.0` with `command: python -m itsm.setup`, no dependency on `initialize` or `backend`, no published host port, read-only root filesystem, dropped capabilities and SELinux level. It listens on `8100` inside the project network only — a proposal; nothing listens there today.
 - Demo keeps setup out with a dedicated Compose profile, the same technique that keeps `worker` out of the default demo (`deploy/compose.demo.yaml:100-101`).
 - `frontend` loses `depends_on: backend` (`compose.yaml:160-162`). `nginx.conf` gets `resolver 127.0.0.11` and variable `proxy_pass`: `/api/setup/v1/` to `setup:8100`, `/api/` to `backend:8000` with `502`/`503` when the API is absent (`frontend/nginx.conf:37-44`). `deploy/nginx-tls.conf:57-65` drops the static `itsm_api` upstream for the same reason.
 - The exact service set in `tests/release_modes_runtime.py:77-81` changes with the new service; that update belongs to T1, not to this contract slice.

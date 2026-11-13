@@ -152,17 +152,49 @@ services:
     restart: "no"
     command: [alembic, upgrade, head]
 
+  # First-start wizard. A separate process on purpose: it must answer while the
+  # database and the API are absent, so it depends on no other service and never
+  # imports a module that opens the database. It is not published on the host;
+  # the frontend edge proxies /api/setup/v1/ to it on the Compose network. Its
+  # only writable state is the private volume below.
+  setup:
+    image: itsm-backend:0.1.0
+    # Same context and tag as the API; Dockerfile.ops keeps building on it.
+    build: ./backend
+    init: true
+    command: [python, -m, itsm.setup]
+    environment:
+      RELEASE_MODE: ${RELEASE_MODE:?Set RELEASE_MODE to dev, prod or demo}
+      ITSM_SETUP_STATE_DIR: /var/lib/itsm-setup
+      # Same operator key ring as the API: setup seals a provider credential
+      # before a database exists. When unset the AI step reports the missing key
+      # instead of silently disabling the provider form.
+      ITSM_AI_CREDENTIAL_KEYS: ${ITSM_AI_CREDENTIAL_KEYS:-}
+    volumes:
+      - setup-state:/var/lib/itsm-setup
+    security_opt:
+      - "no-new-privileges:true"
+      # The setup state volume is shared with later operator commands, so it
+      # needs the same installation level as every other volume consumer.
+      - "label=level:${ITSM_SELINUX_LEVEL:?Reserve an installation-specific SELinux MCS level before running Compose}"
+    cap_drop: [ALL]
+    read_only: true
+    tmpfs: [/tmp]
+    # A wizard app: a few request threads and short-lived probes.
+    pids_limit: 64
+    restart: unless-stopped
+
   frontend:
     image: itsm-frontend:0.1.0
     build: ./frontend
     init: true
     ports: ["127.0.0.1:${ITSM_FRONTEND_PORT:-18080}:8080"]
-    depends_on:
-      backend:
-        condition: service_started
+    # No dependency on the API: a fresh installation has no backend yet and the
+    # wizard is served through this edge. nginx resolves `backend` and `setup`
+    # per request, so an absent API stays a 502/503 instead of blocking boot.
     read_only: true
     tmpfs: [/tmp]
-    security_opt: [no-new-privileges:true]
+    security_opt: ["no-new-privileges:true"]
     cap_drop: [ALL]
     pids_limit: 256
     restart: unless-stopped
@@ -188,9 +220,10 @@ services:
     volumes:
       - ./deploy/nginx-tls.conf:/etc/nginx/nginx.conf:ro,Z
     secrets: [tls_certificate, tls_certificate_key]
+    # Only the UI edge is a real prerequisite. The API and the wizard are
+    # resolved per request inside nginx, so the TLS edge starts for a fresh
+    # installation that has no backend yet.
     depends_on:
-      backend:
-        condition: service_started
       frontend:
         condition: service_started
     # Unprivileged nginx: the listener is 8080 inside the container and the
@@ -198,7 +231,7 @@ services:
     user: "101:101"
     read_only: true
     tmpfs: [/tmp]
-    security_opt: [no-new-privileges:true]
+    security_opt: ["no-new-privileges:true"]
     cap_drop: [ALL]
     pids_limit: 256
     restart: unless-stopped
@@ -251,7 +284,7 @@ services:
       - prometheus-data:/prometheus
     secrets: [monitoring_discovery_token]
     ports: ["127.0.0.1:${ITSM_PROMETHEUS_PORT:-19090}:9090"]
-    security_opt: [no-new-privileges:true]
+    security_opt: ["no-new-privileges:true"]
     cap_drop: [ALL]
     read_only: true
     tmpfs: [/tmp]
@@ -264,7 +297,7 @@ services:
     command: [--config.file=/etc/blackbox_exporter/blackbox.yml]
     volumes:
       - ./deploy/blackbox.yml:/etc/blackbox_exporter/blackbox.yml:ro,Z
-    security_opt: [no-new-privileges:true]
+    security_opt: ["no-new-privileges:true"]
     cap_drop: [ALL]
     cap_add: [NET_RAW]
     read_only: true
@@ -285,7 +318,7 @@ services:
     secrets:
       - source: snmp_auths
         target: snmp_auths.yml
-    security_opt: [no-new-privileges:true]
+    security_opt: ["no-new-privileges:true"]
     cap_drop: [ALL]
     read_only: true
     tmpfs: [/tmp]
@@ -311,7 +344,7 @@ services:
       - /proc:/host/proc:ro
       - /sys:/host/sys:ro
       - /:/host/root:ro
-    security_opt: [no-new-privileges:true]
+    security_opt: ["no-new-privileges:true"]
     cap_drop: [ALL]
     read_only: true
     tmpfs: [/tmp]
@@ -334,7 +367,7 @@ services:
       - alertmanager-data:/alertmanager
     secrets: [monitoring_ingest_token]
     ports: ["127.0.0.1:${ITSM_ALERTMANAGER_PORT:-19093}:9093"]
-    security_opt: [no-new-privileges:true]
+    security_opt: ["no-new-privileges:true"]
     cap_drop: [ALL]
     read_only: true
     tmpfs: [/tmp]
@@ -344,6 +377,8 @@ volumes:
   app-data:
   task-data:
   attachment-data:
+  # Private to the setup process; survives a failed claim until it is retried.
+  setup-state:
   postgres-data:
   redis-data:
   search-data:

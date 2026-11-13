@@ -102,6 +102,11 @@ services:
     environment: *demo-environment
     <<: *demo-volumes
 
+  # Demo never offers the claim flow: the wizard is absent rather than idle.
+  # The profile name states the intent; dev and prod run setup normally.
+  setup:
+    profiles: [setup-excluded]
+
   # Optional synthetic scraper (S17): current UUIDs are discovered over the
   # private backend route every 15s, including after hourly resets. No host
   # network or published ports; no alerting/rules/remote_write. Storage is tmpfs.
@@ -115,7 +120,7 @@ services:
       - --web.listen-address=0.0.0.0:9090
     volumes:
       - ./deploy/demo-prometheus.yml:/etc/prometheus/demo-prometheus.yml:ro,Z
-    security_opt: [no-new-privileges:true]
+    security_opt: ["no-new-privileges:true"]
     cap_drop: [ALL]
     read_only: true
     tmpfs: [/tmp]
