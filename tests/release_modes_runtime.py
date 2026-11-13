@@ -384,7 +384,8 @@ def _security_labels(service: dict) -> list[str]:
     return [str(option) for option in service.get("security_opt", []) or []]
 
 
-def _check_render(model: dict, mode: str, project: str, api_port: int, frontend_port: int):
+def _check_render(model: dict, mode: str, project: str, api_port: int, frontend_port: int,
+                  dev_password: str = ""):
     services = model.get("services", {})
     _expect(model.get("name") == project, f"{mode}: compose project name is {project}")
     _expect(
@@ -544,8 +545,12 @@ def _check_render(model: dict, mode: str, project: str, api_port: int, frontend_
             settings.get("ITSM_DATABASE_URL") == "sqlite:////data/dev/dev.db",
             "dev: database is the project-owned SQLite file",
         )
+        # This run is the explicit headless seed: the wizard-first dev path
+        # starts ownerless when ITSM_DEV_ADMIN_PASSWORD is absent. Ownerlessness
+        # needs a second stack, so the runtime check stays with E2E.
         _expect(
-            bool(services["initialize"]["environment"].get("ITSM_DEV_ADMIN_PASSWORD")),
+            services["initialize"]["environment"].get("ITSM_DEV_ADMIN_PASSWORD")
+            == dev_password,
             "dev: the administrator password comes from the environment",
         )
         _expect(
@@ -985,7 +990,7 @@ def run_mode(mode: str, run_id: str, *, structural_only: bool, ready_timeout: in
     try:
         print(f"=== {mode}: project {project}, api {api_port}, frontend {frontend_port}")
         model = _render(project, mode, override, env)
-        _check_render(model, mode, project, api_port, frontend_port)
+        _check_render(model, mode, project, api_port, frontend_port, dev_password)
         if mode == "prod":
             _check_prod_backup_render(project, mode, override, env)
         if structural_only:
