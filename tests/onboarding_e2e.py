@@ -16,9 +16,11 @@ network. It then walks the implemented onboarding steps:
     owner     create the first owner, log in to the normal API as superadmin,
               and read the transferred AI provider back through that API
 
-The remaining steps (configuration, verify, complete, recovery, docs-in-image)
-are declared stubs: they print ``SKIP`` and are listed in the report. A stub
-never passes.
+The later steps drive assisted configuration, verification, completion and
+recovery through the setup API, and read the bundled documentation pack from
+inside the API image. Every observation is recorded; an item the operator
+postponed stays postponed and a production backup accepted as a risk stays a
+risk, never a pass.
 
 Boundaries that are deliberate:
 
@@ -56,6 +58,7 @@ import os
 import secrets
 import shutil
 import socket
+import ssl
 import subprocess
 import sys
 import tempfile
@@ -115,14 +118,20 @@ FIXTURE_PORT = 8080
 FIXTURE_MODEL = "probe-model"
 FIXTURE_BASE_URL = f"http://{FIXTURE_SERVICE}:{FIXTURE_PORT}/v1"
 
-STEP_ORDER = ("boot", "claim", "ai", "restart", "storage", "owner")
-STUB_STEPS: dict[str, str] = {
-    "configuration": "not implemented yet; waits for the configuration step (T5)",
-    "verify": "not implemented yet; waits for the verified transfer step (T5)",
-    "complete": "not implemented yet; waits for the completion step (T6)",
-    "recovery": "not implemented yet; waits for the recovery step (T6)",
-    "docs-in-image": "not implemented yet; waits for the bundled-docs step (T6)",
-}
+STEP_ORDER = (
+    "boot",
+    "claim",
+    "ai",
+    "restart",
+    "storage",
+    "owner",
+    "configuration",
+    "verify",
+    "complete",
+    "recovery",
+    "docs-in-image",
+)
+STUB_STEPS: dict[str, str] = {}
 
 # The anonymous status allowlist from itsm.setup.schemas, restated so the
 # harness fails when the wire grows a field before this contract is updated.
@@ -157,6 +166,10 @@ class HarnessBlocked(RuntimeError):
 
 class StepFailure(RuntimeError):
     """One implemented step failed; its reason is recorded and printed."""
+
+
+class StepBlocked(RuntimeError):
+    """A step cannot be asserted in this environment; never a pass and never a skip."""
 
 
 class CommandError(RuntimeError):
@@ -238,7 +251,13 @@ class Client:
         self.origin = origin
         policy = http.cookiejar.DefaultCookiePolicy(secure_protocols=("https", "http"))
         self.jar = http.cookiejar.CookieJar(policy)
-        self.opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(self.jar))
+        self.ssl_context = (
+            ssl._create_unverified_context() if self.base_url.startswith("https://") else None
+        )
+        self.opener = urllib.request.build_opener(
+            urllib.request.HTTPCookieProcessor(self.jar),
+            urllib.request.HTTPSHandler(context=self.ssl_context),
+        )
 
     def request(
         self,
@@ -272,19 +291,35 @@ class Harness:
         self.mode: str = args.mode
         self.images_tag: str = args.images_tag
         self.project = self._project_name()
-        self.api_port, self.frontend_port = _free_loopback_ports(2)
-        self.origin = f"http://127.0.0.1:{self.frontend_port}"
-        self.client = Client(self.origin, self.origin)
+        ports = _free_loopback_ports(3 if self.mode == "prod" else 2)
+        self.api_port, self.frontend_port = ports[:2]
+        self.tls_port = ports[2] if self.mode == "prod" else None
+        if self.mode == "prod" and self.tls_port is not None:
+            # Production refuses a loopback origin: the wizard must be reached
+            # through a TLS edge on a public name, exactly like the documented
+            # reverse-proxy deployment. The disposable edge terminates TLS with
+            # a self-signed certificate and proxies the frontend container.
+            self.origin = f"https://itsm-e2e.test:{self.tls_port}"
+            client_base = f"https://127.0.0.1:{self.tls_port}"
+        else:
+            self.origin = f"http://127.0.0.1:{self.frontend_port}"
+            client_base = self.origin
+        self.client = Client(client_base, self.origin)
         self.credential_key = self._fernet_key()
         self.provider_key = secrets.token_urlsafe(24)
         self.csrf = ""
         self.env = self._environment()
         self.temp_dir = Path(tempfile.mkdtemp(prefix=f"onboarding-e2e-{self.mode}-"))
         self.override = self.temp_dir / "compose.override.yaml"
+        if self.mode == "prod":
+            self._write_tls_edge()
         self.override.write_text(self._override_document(), encoding="utf-8")
 
         self.started = False
         self.failed_steps: list[str] = []
+        self.blocked_steps: list[str] = []
+        self.blocked_sources: dict[str, str] = {}
+        self.snapshot_archive: Path | None = None
         self.exit_code = 1
         self.steps: list[dict] = []
         self.leftovers: dict[str, list[str]] = {}
@@ -330,6 +365,18 @@ class Harness:
         # The fixture's exact DNS name (no port so any port matches) is the only
         # private destination this project authorizes.
         env["ITSM_AI_PERSONAL_PRIVATE_ENDPOINTS"] = FIXTURE_SERVICE
+        # The assisted agent section reads its credential from the process
+        # environment, exactly like an operator-provided key. The disposable
+        # value is the fixture's and the OpenAI-compatible base URL points at
+        # the same fixture, so the probe is a real tool-calling round trip.
+        env["OPENAI_API_KEY"] = self.provider_key
+        env["ITSM_AGENT_OPENAI_BASE_URL"] = FIXTURE_BASE_URL
+        # The setup ping is enqueued by the wizard process and consumed by the
+        # worker; both must point at the same SQLite queue file. The dev overlay
+        # keeps that file on the dev-data volume, production on task-data.
+        env["ITSM_TASK_SQLITE_PATH"] = (
+            "/data/dev/tasks/huey.db" if self.mode == "dev" else "/data/tasks/huey.db"
+        )
         if self.mode == "dev":
             env["ITSM_DEV_ADMIN_PASSWORD"] = secrets.token_urlsafe(18)
         else:
@@ -361,6 +408,23 @@ class Harness:
         lines = [
             "# Generated by tests/onboarding_e2e.py; disposable, never committed.",
             "services:",
+        ]
+        if self.mode == "prod":
+            # A disposable TLS edge on the public name the harness configured as
+            # ITSM_AUTH_ORIGIN. It is the only origin the client speaks to, so
+            # production's Secure-cookie/public-origin rule is exercised for real.
+            lines += [
+                "  tls-edge:",
+                "    image: nginx:stable",
+                "    depends_on: [frontend]",
+                "    ports:",
+                f'      - "127.0.0.1:{self.tls_port}:8443"',
+                "    volumes:",
+                f"      - {self.temp_dir}/nginx.conf:/etc/nginx/nginx.conf:ro",
+                f"      - {self.temp_dir}/cert.pem:/etc/tls/cert.pem:ro",
+                f"      - {self.temp_dir}/key.pem:/etc/tls/key.pem:ro",
+            ]
+        lines += [
             "  setup:",
             f"    image: {self.backend_image}",
             "    environment:",
@@ -368,13 +432,20 @@ class Harness:
             "      # variable names so no credential is ever written to disk.",
             "      ITSM_AI_CREDENTIAL_KEYS: ${ITSM_AI_CREDENTIAL_KEYS:-}",
             "      ITSM_AI_PERSONAL_PRIVATE_ENDPOINTS: ${ITSM_AI_PERSONAL_PRIVATE_ENDPOINTS:-}",
+            "      OPENAI_API_KEY: ${OPENAI_API_KEY:-}",
+            "      ITSM_AGENT_OPENAI_BASE_URL: ${ITSM_AGENT_OPENAI_BASE_URL:-}",
+            "      ITSM_TASK_SQLITE_PATH: ${ITSM_TASK_SQLITE_PATH:-}",
+        ]
+        lines += [
+            "    volumes:",
+            "      - task-data:/data/tasks",
+            "      - attachment-data:/data/attachments",
         ]
         if self.mode == "dev":
             # The wizard needs a writable directory for the dev SQLite target.
             # A root one-shot owns it exactly like setup-volume-init owns the
             # wizard state, and the API reads the same volume.
             lines += [
-                "    volumes:",
                 "      - dev-data:/data/dev",
             ]
         lines += [
@@ -436,6 +507,60 @@ class Harness:
             f"      - {FIXTURE_SCRIPT}:/opt/itsm-fixture/ai_provider_fixture.py:ro",
         ]
         return "\n".join(lines) + "\n"
+
+    def _write_tls_edge(self) -> None:
+        """Generate the disposable certificate and nginx config for prod."""
+        cert = self.temp_dir / "cert.pem"
+        key = self.temp_dir / "key.pem"
+        generated = _run(
+            [
+                "openssl",
+                "req",
+                "-x509",
+                "-newkey",
+                "rsa:2048",
+                "-nodes",
+                "-days",
+                "1",
+                "-subj",
+                "/CN=itsm-e2e.test",
+                "-addext",
+                "subjectAltName=DNS:itsm-e2e.test",
+                "-keyout",
+                str(key),
+                "-out",
+                str(cert),
+            ],
+            self.env,
+            timeout=60,
+        )
+        _expect(
+            generated.returncode == 0,
+            f"the disposable TLS certificate is generated ({(generated.stderr or '').strip()[:200]})",
+        )
+        (self.temp_dir / "nginx.conf").write_text(
+            "\n".join(
+                [
+                    "events {}",
+                    "http {",
+                    "  server {",
+                    "    listen 8443 ssl;",
+                    "    ssl_certificate /etc/tls/cert.pem;",
+                    "    ssl_certificate_key /etc/tls/key.pem;",
+                    "    location / {",
+                    "      proxy_pass http://frontend:8080;",
+                    "      proxy_http_version 1.1;",
+                    "      proxy_set_header Host $host;",
+                    "      proxy_set_header X-Forwarded-Proto https;",
+                    "      proxy_set_header X-Forwarded-For $remote_addr;",
+                    "    }",
+                    "  }",
+                    "}",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
 
     # ------------------------------------------------------------------ docker
     def compose_argv(self, *args: str, profiles: tuple[str, ...] = ()) -> list[str]:
@@ -591,16 +716,16 @@ class Harness:
 
     # ------------------------------------------------------------------- steps
     def step_boot(self) -> dict:
+        services = ["setup-volume-init", "setup", "frontend", FIXTURE_SERVICE]
+        if self.mode == "prod":
+            services.append("tls-edge")
         up = self.compose(
             "up",
             "-d",
             "--no-build",
             "--pull",
             "never",
-            "setup-volume-init",
-            "setup",
-            "frontend",
-            FIXTURE_SERVICE,
+            *services,
             timeout=self.args.startup_timeout,
         )
         self.started = True
@@ -1298,6 +1423,685 @@ class Harness:
             "resumed_csrf": resumed.status,
         }
 
+    # --------------------------------------------------------- configuration
+    @staticmethod
+    def _checklist_by_id(body: dict) -> dict[str, dict]:
+        return {
+            str(item.get("id")): item
+            for item in body.get("checklist") or []
+            if isinstance(item, dict)
+        }
+
+    def _section(self, name: str) -> dict:
+        response = self.client.request(
+            "GET", f"{SETUP_PREFIX}/configuration/{name}", timeout=30
+        )
+        _expect(
+            response.status == 200,
+            f"the {name} section is readable (got {response.status}: {response.text()[:160]})",
+        )
+        return response.json()
+
+    def step_configuration(self) -> dict:
+        started = self.setup_mutation("/configuration", {})
+        _expect(
+            started.status == 200,
+            f"configuration starts (got {started.status}: {started.text()[:200]})",
+        )
+        _expect(
+            started.json().get("state") == "configuring",
+            "the wizard reports the configuring state",
+        )
+
+        overview = self.client.request("GET", f"{SETUP_PREFIX}/configuration", timeout=30)
+        _expect(
+            overview.status == 200,
+            f"the configuration overview is readable (got {overview.status})",
+        )
+        sections = {
+            str(item.get("section")): item
+            for item in overview.json().get("sections") or []
+            if isinstance(item, dict)
+        }
+        _expect(
+            (sections.get("appearance") or {}).get("status") == "pending",
+            "appearance starts undecided",
+        )
+
+        appearance = self._section("appearance")
+        current = appearance.get("current") or {}
+        preset_before = str(current.get("preset") or "")
+        builtins = [str(value) for value in current.get("builtinIds") or []]
+        target = next(
+            (
+                name
+                for name in ("blue", "forest", "generic")
+                if name != preset_before and (not builtins or name in builtins)
+            ),
+            None,
+        )
+        _expect(target is not None, f"a different appearance preset exists (current {preset_before!r})")
+
+        preview = self.setup_mutation(
+            "/configuration/appearance", {"values": {"preset": target}}
+        )
+        _expect(
+            preview.status == 200,
+            f"the appearance change previews (got {preview.status}: {preview.text()[:200]})",
+        )
+        preview_body = preview.json()
+        _expect(
+            preview_body.get("status") == "preview" and preview_body.get("preview_only") is True,
+            "the preview reports itself as a preview",
+        )
+        changes = preview_body.get("changes") or []
+        _expect(
+            any(
+                change.get("field") == "preset" and change.get("to") == target
+                for change in changes
+                if isinstance(change, dict)
+            ),
+            f"the preview lists the preset change to {target!r}",
+        )
+        _expect(
+            (self._section("appearance").get("current") or {}).get("preset") == preset_before,
+            "the preview wrote nothing",
+        )
+
+        applied = self.setup_mutation(
+            "/configuration/appearance/apply",
+            {"values": {"preset": target}, "action": "apply", "confirm": True},
+        )
+        _expect(
+            applied.status == 200,
+            f"the appearance change applies (got {applied.status}: {applied.text()[:200]})",
+        )
+        _expect(
+            applied.json().get("status") == "passed",
+            f"the appearance receipt is green (got {applied.json().get('status')!r})",
+        )
+        readback = self._section("appearance")
+        _expect(readback.get("status") == "passed", "the appearance decision is stored as green")
+        _expect(
+            (readback.get("current") or {}).get("preset") == target,
+            f"the applied appearance reads back as {target!r}",
+        )
+
+        postponed = self.setup_mutation(
+            "/configuration/notifications/apply",
+            {
+                "values": {"reason": "e2e defers notification channels"},
+                "action": "postpone",
+                "confirm": True,
+            },
+        )
+        _expect(
+            postponed.status == 200,
+            f"notifications can be postponed (got {postponed.status}: {postponed.text()[:200]})",
+        )
+        _expect(
+            postponed.json().get("status") == "postponed",
+            f"notifications are recorded as postponed (got {postponed.json().get('status')!r})",
+        )
+        notification = self._section("notifications")
+        _expect(
+            notification.get("status") == "postponed",
+            f"the postponed decision reads back (got {notification.get('status')!r})",
+        )
+        _expect(
+            notification.get("status") != "passed",
+            "a postponed section is never reported green",
+        )
+
+        return {
+            "state": started.json().get("state"),
+            "preset_before": preset_before,
+            "preset_after": (readback.get("current") or {}).get("preset"),
+            "changed_fields": [change.get("field") for change in changes if isinstance(change, dict)],
+            "notifications": notification.get("status"),
+        }
+
+    # -------------------------------------------------------------- verify
+    def _start_worker(self) -> None:
+        started = self.compose(
+            "up",
+            "-d",
+            "--no-build",
+            "--pull",
+            "never",
+            "--no-deps",
+            "worker",
+            timeout=self.args.startup_timeout,
+        )
+        _expect(
+            started.returncode == 0,
+            f"the worker starts ({started.returncode}): {(started.stderr or '').strip()[:300]}",
+        )
+
+    def _apply_agent_section(self) -> dict:
+        applied = self.setup_mutation(
+            "/configuration/agent/apply",
+            {
+                "values": {"provider": "openai", "model": FIXTURE_MODEL},
+                "action": "apply",
+                "confirm": True,
+            },
+            timeout=180,
+        )
+        _expect(
+            applied.status == 200,
+            f"the agent section applies (got {applied.status}: {applied.text()[:240]})",
+        )
+        body = applied.json()
+        receipt = body.get("receipt") or {}
+        return {
+            "status": body.get("status"),
+            "capability": receipt.get("capability"),
+            "tool": receipt.get("tool"),
+            "reason": receipt.get("reason"),
+        }
+
+    def step_verify(self) -> dict:
+        self._start_worker()
+        agent = self._apply_agent_section()
+        _expect(
+            agent.get("capability") == "verified",
+            f"the agent probe observed the model calling a tool (got {agent!r})",
+        )
+        _expect(
+            agent.get("status") == "passed",
+            f"the agent section is green after the observed probe (got {agent.get('status')!r})",
+        )
+
+        response = self.setup_mutation("/verify", {}, timeout=180)
+        for _ in range(3):
+            if response.status == 200:
+                break
+            body = _safe_json(response) or {}
+            if "worker_ready" not in set(body.get("blocking") or []):
+                break
+            time.sleep(5)
+            response = self.setup_mutation("/verify", {}, timeout=180)
+
+        body = _safe_json(response) or {}
+        items = self._checklist_by_id(body)
+        blocking = [str(name) for name in body.get("blocking") or []]
+
+        if self.mode == "prod":
+            backup = items.get("backup_policy_declared") or {}
+            _expect(backup.get("required") is True, "the production backup is required")
+            _expect(
+                backup.get("status") != "passed",
+                "an undeclared production backup is not green before it is decided",
+            )
+            risk = self.setup_mutation(
+                "/configuration/operational/apply",
+                {
+                    "values": {
+                        "item": "backup_policy_declared",
+                        "reason": "e2e accepts the backup risk",
+                    },
+                    "action": "accept_risk",
+                    "confirm": True,
+                },
+            )
+            _expect(
+                risk.status == 200,
+                f"the backup risk is accepted (got {risk.status}: {risk.text()[:200]})",
+            )
+            _expect(
+                risk.json().get("status") == "risk",
+                f"the accepted backup is reported as a risk (got {risk.json().get('status')!r})",
+            )
+            _expect(
+                (self._section("operational").get("status")) == "risk",
+                "the accepted risk reads back as a risk",
+            )
+            response = self.setup_mutation("/verify", {}, timeout=180)
+            body = _safe_json(response) or {}
+            items = self._checklist_by_id(body)
+            blocking = [str(name) for name in body.get("blocking") or []]
+            backup = items.get("backup_policy_declared") or {}
+            _expect(
+                backup.get("status") == "risk" and backup.get("acceptedRisk") is True,
+                f"the checklist keeps the backup as an accepted risk (got {backup!r})",
+            )
+            _expect(
+                backup.get("blocking") is False,
+                "the accepted backup risk no longer blocks",
+            )
+
+        if response.status != 200:
+            _expect(
+                body.get("error") == "verification_blocked",
+                f"a refused verification reports verification_blocked (got {body.get('error')!r})",
+            )
+            if "ai_explicit" in blocking:
+                pending = items.get("ai_explicit") or {}
+                raise StepBlocked(
+                    "verify refused: required ai_explicit is "
+                    f"{pending.get('status')!r} ({pending.get('evidence')})"
+                )
+            if "session_valid" in blocking:
+                pending = items.get("session_valid") or {}
+                raise StepBlocked(
+                    "verify refused: required session_valid is "
+                    f"{pending.get('status')!r} ({pending.get('evidence')}); production "
+                    "requires Secure cookies on a public origin and the harness edge is loopback"
+                )
+            raise StepFailure(
+                "verify refused with blocking "
+                f"{blocking}: "
+                + "; ".join(
+                    f"{item.get('id')}={item.get('status')}: {str(item.get('evidence'))[:140]}"
+                    for item in items.values()
+                    if item.get("id") in blocking
+                )
+            )
+
+        _expect(body.get("state") == "verifying", f"verify opens verifying (got {body.get('state')!r})")
+        _expect(body.get("ready") is True, "the checklist reports ready")
+        required = [item for item in items.values() if item.get("required")]
+        non_green = [
+            str(item.get("id"))
+            for item in required
+            if item.get("status") != "passed" and item.get("acceptedRisk") is not True
+        ]
+        _expect(not non_green, f"every required checklist item is green (non-green: {non_green})")
+        worker = items.get("worker_ready") or {}
+        _expect(worker.get("status") == "passed", "the worker round-trip is green")
+        _expect(
+            "worker completed the setup ping" in str(worker.get("evidence")),
+            f"the worker evidence is an observed round trip (got {worker.get('evidence')!r})",
+        )
+        ai = items.get("ai_explicit") or {}
+        _expect(ai.get("status") == "passed", f"ai_explicit is green (got {ai.get('status')!r})")
+        smtp = items.get("smtp") or {}
+        _expect(smtp.get("status") == "postponed", "the postponed notification stays postponed")
+        postponed = [identifier for identifier, item in items.items() if item.get("status") == "postponed"]
+        unavailable = [
+            identifier
+            for identifier, item in items.items()
+            if identifier in {"external_search", "external_engines"}
+            and item.get("status") == "unavailable"
+        ]
+        _expect(
+            sorted(unavailable) == ["external_engines", "external_search"],
+            f"both absent capabilities are unavailable (got {unavailable})",
+        )
+        integrations = items.get("integrations") or {}
+        _expect(
+            integrations.get("required") is False and integrations.get("blocking") is False,
+            "the integrations item exists, is not required and does not block",
+        )
+
+        return {
+            "state": body.get("state"),
+            "agent": agent,
+            "worker": worker.get("evidence"),
+            "postponed": sorted(postponed),
+            "unavailable": sorted(unavailable),
+            "checklist": {
+                identifier: {
+                    "status": item.get("status"),
+                    "blocking": item.get("blocking"),
+                    "acceptedRisk": item.get("acceptedRisk"),
+                }
+                for identifier, item in items.items()
+            },
+        }
+
+    # -------------------------------------------------------------- complete
+    def _project_volume(self, logical: str) -> str:
+        result = self.docker(
+            "volume",
+            "ls",
+            "-q",
+            "--filter",
+            f"label=com.docker.compose.project={self.project}",
+            "--filter",
+            f"label=com.docker.compose.volume={logical}",
+            check=True,
+        )
+        names = [line.strip() for line in (result.stdout or "").splitlines() if line.strip()]
+        _expect(len(names) == 1, f"exactly one {logical} volume exists (got {names})")
+        return names[0]
+
+    def _snapshot_setup_state(self) -> dict:
+        """Copy the private setup store volume aside before completion."""
+
+        volume = self._project_volume("setup-state")
+        archive = self.temp_dir / "setup-state-before-complete.tar"
+        result = self.docker(
+            "run",
+            "--rm",
+            "--user",
+            "0:0",
+            "--entrypoint",
+            "tar",
+            "-v",
+            f"{volume}:/from:ro",
+            "-v",
+            f"{self.temp_dir}:/snapshot",
+            self.backend_image,
+            "-cf",
+            f"/snapshot/{archive.name}",
+            "-C",
+            "/from",
+            ".",
+            timeout=120,
+        )
+        _expect(
+            result.returncode == 0,
+            f"the setup store snapshot is written ({result.returncode}): "
+            f"{(result.stderr or '').strip()[:300]}",
+        )
+        _expect(
+            archive.is_file() and archive.stat().st_size > 0,
+            "the setup store snapshot is non-empty",
+        )
+        self.snapshot_archive = archive
+        return {"volume": volume, "bytes": archive.stat().st_size}
+
+    def _assert_no_report_secret(self, report: dict) -> None:
+        def walk(value) -> None:
+            if isinstance(value, dict):
+                for key, child in value.items():
+                    lowered = str(key).lower()
+                    _expect(
+                        not any(token in lowered for token in FORBIDDEN_STATUS_TOKENS),
+                        f"the report has no secret-like key (got {key!r})",
+                    )
+                    walk(child)
+            elif isinstance(value, list):
+                for child in value:
+                    walk(child)
+
+        walk(report)
+        text = json.dumps(report, sort_keys=True)
+        in_play = {
+            "provider_key": self.provider_key,
+            "credential_key": self.credential_key,
+        }
+        if self.mode == "prod":
+            in_play["database_password"] = self.env["ITSM_POSTGRES_PASSWORD"]
+        leaked = [name for name, value in in_play.items() if value and value in text]
+        _expect(not leaked, f"the report carries no secret value (leaked: {leaked})")
+
+    def step_complete(self) -> dict:
+        exported = self.client.request("GET", f"{SETUP_PREFIX}/report", timeout=60)
+        _expect(
+            exported.status == 200,
+            f"the pre-completion report is readable (got {exported.status}: {exported.text()[:200]})",
+        )
+        preview = exported.json()
+        _expect(preview.get("state") == "verifying", "the exported report is a verifying preview")
+        _expect(preview.get("contract") == "onboarding/v1", "the report names its contract")
+        self._assert_no_report_secret(preview)
+
+        old_session = next(
+            (cookie.value for cookie in self.client.jar if cookie.name == COOKIE_NAME), None
+        )
+        _expect(bool(old_session), "the pre-completion setup session is present")
+        snapshot = self._snapshot_setup_state()
+
+        completed = self.setup_mutation("/complete", {}, timeout=120)
+        _expect(
+            completed.status == 200,
+            f"the installation completes (got {completed.status}: {completed.text()[:240]})",
+        )
+        body = completed.json()
+        _expect(body.get("state") == "complete", f"completion reports complete (got {body.get('state')!r})")
+        digest = str(body.get("report_digest") or "")
+        _expect(
+            len(digest) == 64 and all(character in "0123456789abcdef" for character in digest),
+            f"completion returns a sha256 report digest (got {digest[:16]!r})",
+        )
+        _expect(bool(body.get("completed_at")), "completion records a timestamp")
+
+        status = self.wait_status(
+            timeout=60, predicate=lambda payload: payload.get("state") == "complete"
+        )
+        _expect(status.get("setup_enabled") is False, "a complete installation disables setup")
+        _expect(status.get("claim_available") is False, "a complete installation offers no claim")
+
+        ready = self.wait_http(
+            "/api/v1/health/ready",
+            lambda response: response.status == 200
+            and (_safe_json(response) or {}).get("installation_complete") is True,
+            timeout=60,
+            description="installation_complete in the normal API",
+        )
+        compatibility = ready.json()
+        _expect(
+            compatibility.get("installation_state") == "complete",
+            f"the normal API labels the installation complete (got "
+            f"{compatibility.get('installation_state')!r})",
+        )
+
+        refused = self.setup_mutation(
+            "/configuration/notifications/apply",
+            {"values": {"reason": "after complete"}, "action": "postpone", "confirm": True},
+        )
+        _expect(
+            refused.status == 409,
+            f"a setup mutation after completion is refused (got {refused.status})",
+        )
+        _expect(
+            (_safe_json(refused) or {}).get("error") == "setup_complete",
+            f"the refusal is setup_complete (got {refused.text()[:160]})",
+        )
+
+        rejected = self.client.request(
+            "GET",
+            f"{SETUP_PREFIX}/session",
+            headers={"Cookie": f"{COOKIE_NAME}={old_session}"},
+            timeout=15,
+        )
+        _expect(
+            rejected.status == 401,
+            f"the pre-completion setup session is rejected (got {rejected.status})",
+        )
+        after = self.client.request("GET", f"{SETUP_PREFIX}/report", timeout=15)
+        _expect(
+            after.status in {401, 409},
+            "the report is closed after completion and the old session is rejected "
+            f"(got {after.status})",
+        )
+
+        return {
+            "state": body.get("state"),
+            "completed_at": body.get("completed_at"),
+            "report_digest": digest,
+            "snapshot_bytes": snapshot["bytes"],
+            "installation_complete": compatibility.get("installation_complete"),
+            "mutation_after_complete": refused.status,
+            "old_session": rejected.status,
+        }
+
+    # -------------------------------------------------------------- recovery
+    def step_recovery(self) -> dict:
+        archive = self.snapshot_archive
+        if archive is None or not archive.is_file():
+            raise StepFailure("a pre-completion setup snapshot exists")
+
+        restarted = self.compose("restart", timeout=240)
+        _expect(
+            restarted.returncode == 0,
+            f"every service restarts ({restarted.returncode}): "
+            f"{(restarted.stderr or '').strip()[:300]}",
+        )
+        status = self.wait_status(
+            timeout=120, predicate=lambda payload: payload.get("state") == "complete"
+        )
+        _expect(status.get("state") == "complete", "completion survives a full restart")
+        ready = self.wait_http(
+            "/api/v1/health/ready",
+            lambda response: response.status == 200
+            and (_safe_json(response) or {}).get("installation_complete") is True,
+            timeout=120,
+            description="installation_complete after the restart",
+        )
+        _expect(
+            ready.json().get("installation_state") == "complete",
+            "the normal API still reports the installation complete after a restart",
+        )
+
+        volume = self._project_volume("setup-state")
+        stopped = self.compose("stop", "setup", timeout=60)
+        _expect(
+            stopped.returncode == 0,
+            f"the wizard stops before the restore ({stopped.returncode})",
+        )
+        restored = None
+        try:
+            restored = self.docker(
+                "run",
+                "--rm",
+                "--user",
+                "0:0",
+                "--entrypoint",
+                "tar",
+                "-v",
+                f"{volume}:/d",
+                "-v",
+                f"{self.temp_dir}:/snapshot",
+                self.backend_image,
+                "-xf",
+                f"/snapshot/{archive.name}",
+                "-C",
+                "/d",
+                timeout=120,
+            )
+        finally:
+            started = self.compose("start", "setup", timeout=60)
+        _expect(
+            restored is not None and restored.returncode == 0,
+            "the pre-completion store snapshot is restored",
+        )
+        _expect(
+            started.returncode == 0,
+            f"the wizard starts on the restored store ({started.returncode})",
+        )
+
+        status = self.wait_status(
+            timeout=120, predicate=lambda payload: payload.get("state") == "complete"
+        )
+        _expect(
+            status.get("state") == "complete",
+            f"the database marker still reports complete (got {status.get('state')!r})",
+        )
+
+        claim = self.client.request(
+            "POST",
+            f"{SETUP_PREFIX}/claim",
+            body={"credential": secrets.token_urlsafe(32)},
+            headers={"Origin": self.origin},
+            timeout=30,
+        )
+        _expect(
+            claim.status == 409,
+            f"a restored store cannot reopen the claim (got {claim.status})",
+        )
+        _expect(
+            (_safe_json(claim) or {}).get("error") == "setup_complete",
+            "the claim refusal is setup_complete",
+        )
+
+        recovery = self.compose(
+            "exec", "-T", "setup", "python", "-m", "itsm.setup.cli", "recover", timeout=60
+        )
+        _expect(
+            recovery.returncode != 0,
+            "the setup CLI refuses to reopen a complete installation",
+        )
+        output = (recovery.stdout or "") + (recovery.stderr or "")
+        lines = [line for line in output.splitlines() if line.strip()]
+        try:
+            refusal = json.loads(lines[-1]) if lines else {}
+        except json.JSONDecodeError:
+            raise StepFailure("the recover refusal did not print JSON") from None
+        _expect(
+            refusal.get("status") == "error" and refusal.get("code") == "installation_complete",
+            f"recover reports installation_complete (got {refusal!r})",
+        )
+
+        return {
+            "restarted": True,
+            "state_after_restart": "complete",
+            "restored_from": archive.name,
+            "claim": claim.status,
+            "recover_exit": recovery.returncode,
+            "recover_code": refusal.get("code"),
+        }
+
+    # --------------------------------------------------------- docs in image
+    def step_docs_in_image(self) -> dict:
+        backend = self.container_id("backend")
+        inspected = self.docker("inspect", "--format", "{{json .Mounts}}", backend, check=True)
+        mounts = json.loads((inspected.stdout or "[]").strip() or "[]")
+        repository = ROOT.resolve()
+        repo_binds = []
+        for mount in mounts:
+            if isinstance(mount, dict) and str(mount.get("Type")) == "bind":
+                source = Path(str(mount.get("Source") or "")).resolve()
+                if source == repository or source.is_relative_to(repository):
+                    repo_binds.append(str(source))
+        _expect(
+            not repo_binds,
+            f"the API container has no bind mount of the repository (got {repo_binds})",
+        )
+
+        code = (
+            "import json\n"
+            "from itsm.project_context.service import ProjectContextService, UnknownDocument\n"
+            "service = ProjectContextService()\n"
+            "found = service.search_project_docs('setup', limit=5).model_dump(mode='json')\n"
+            "first = found['matches'][0]\n"
+            "document = service.read_project_doc(\n"
+            "    first['path'], section=first['section'], limit=400\n"
+            ").model_dump(mode='json')\n"
+            "refused = False\n"
+            "try:\n"
+            "    service.read_project_doc('../../etc/passwd')\n"
+            "except UnknownDocument:\n"
+            "    refused = True\n"
+            "print(json.dumps({\n"
+            "    'matches': len(found['matches']),\n"
+            "    'path': first['path'],\n"
+            "    'section': first['section'],\n"
+            "    'chars': len(document['text']),\n"
+            "    'refused': refused,\n"
+            "    'pack': str(service.pack_path),\n"
+            "    'fixture': service.fixture,\n"
+            "    'digest': service.pack.source_digest,\n"
+            "}))\n"
+        )
+        result = self._json_in("backend", code)
+        _expect(int(result.get("matches") or 0) >= 1, "the documentation search returns a match")
+        _expect(str(result.get("path") or "").endswith(".md"), "the match names a document")
+        _expect(int(result.get("chars") or 0) > 0, "the document read returns text")
+        _expect(result.get("fixture") is False, "the image ships the generated, not fixture, pack")
+        _expect(result.get("refused") is True, "a traversal path is refused")
+        pack = str(result.get("pack") or "")
+        _expect(
+            bool(pack) and str(repository) not in pack and "/itsm/project_context/pack.json" in pack,
+            f"the pack is loaded from inside the image (got {pack!r})",
+        )
+
+        return {
+            "backend": backend,
+            "bind_mounts_of_repo": repo_binds,
+            "match": {
+                "path": result.get("path"),
+                "section": result.get("section"),
+                "chars": result.get("chars"),
+            },
+            "traversal_refused": result.get("refused"),
+            "pack": pack,
+            "source_digest": result.get("digest"),
+        }
+
     # ----------------------------------------------------------------- control
     def _cleanup_profiles(self) -> tuple[str, ...]:
         """Profiles whose services were started on purpose, so ``down`` sees them."""
@@ -1306,7 +2110,7 @@ class Harness:
     def _capture_logs(self) -> dict[str, list[str]]:
         print(f"--- bounded logs for project {self.project} ({self.mode}) ---", file=sys.stderr)
         captured: dict[str, list[str]] = {}
-        for service in ("setup", "backend", "postgres", "frontend", FIXTURE_SERVICE):
+        for service in ("setup", "backend", "worker", "postgres", "frontend", FIXTURE_SERVICE):
             try:
                 result = self.compose(
                     "logs", "--no-color", "--tail", "40", service, timeout=30
@@ -1341,12 +2145,33 @@ class Harness:
         )
 
         blocker: str | None = None
+        dependents = {"verify": ("complete", "recovery"), "complete": ("recovery",)}
         for name in implemented:
             if blocker is not None:
                 self._record(name, "SKIP", reason=f"not attempted: {blocker} failed")
                 continue
+            dependent = next(
+                (
+                    source
+                    for source, children in dependents.items()
+                    if name in children and source in self.blocked_sources
+                ),
+                None,
+            )
+            if dependent is not None:
+                reason = f"depends on {dependent}: {self.blocked_sources[dependent]}"
+                self.blocked_steps.append(name)
+                self._record(name, "BLOCKED", reason=reason)
+                print(f"BLOCKED {name}: {reason}", file=sys.stderr)
+                continue
             try:
-                observations = getattr(self, f"step_{name}")()
+                observations = getattr(self, f"step_{name.replace('-', '_')}")()
+            except StepBlocked as exc:
+                reason = str(exc)
+                self.blocked_steps.append(name)
+                self.blocked_sources[name] = reason
+                self._record(name, "BLOCKED", reason=reason)
+                print(f"BLOCKED {name}: {reason}", file=sys.stderr)
             except StepFailure as exc:
                 blocker = name
                 self.failed_steps.append(name)
@@ -1465,6 +2290,8 @@ class Harness:
             self.preflight()
             self.exit_code = 1
             self._run_steps()
+            if self.blocked_steps and not self.failed_steps:
+                self.exit_code = 2
         except HarnessBlocked as exc:
             self.exit_code = 2
             print(f"BLOCKED: {exc}", file=sys.stderr)
@@ -1485,7 +2312,11 @@ class Harness:
             print(f"RESULT failed: {self.mode} (failed: {', '.join(self.failed_steps)})")
             return 1
         if self.exit_code == 2:
-            print(f"RESULT blocked: {self.mode}")
+            detail = "; ".join(
+                f"{name}: {self.blocked_sources.get(name, 'dependency blocked')}"
+                for name in self.blocked_steps
+            )
+            print(f"RESULT blocked: {self.mode} ({detail or 'environment cannot assert the run'})")
             return 2
         skipped = [name for name in STUB_STEPS if name in self.args.steps]
         print(
