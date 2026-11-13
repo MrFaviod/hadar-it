@@ -165,12 +165,22 @@ def check_readme_start_path() -> None:
           and "COMPOSE_FILE=compose.yaml:deploy/compose.dev.yaml" in template)
     check("install copies template without overwriting private config",
           "cp -n .env.example .env" in install and "chmod 600 .env" in install)
-    check("install requires allocated MCS and a new local password",
+    check("install allocates MCS and keeps the headless password explicit",
           "ITSM_SELINUX_LEVEL" in install
           and "ITSM_DEV_ADMIN_PASSWORD" in install
           and "12–128" in install)
+    check("install makes the wizard the first-start path",
+          "python -m itsm.setup.cli enable-claim" in install
+          and "setup wizard" in install
+          and "Headless development seed" in install)
+    check("install documents setup recovery",
+          "python -m itsm.setup.cli recover" in install)
     check("template contains no default development password",
-          "ITSM_DEV_ADMIN_PASSWORD=\n" in template)
+          "ITSM_DEV_ADMIN_PASSWORD=\n" in template
+          and "Optional, headless only" in template)
+    check("template documents installation-owned settings",
+          "#ITSM_INSTALLATION_CONFIG=" in template
+          and "#ITSM_SETUP_ALLOWED_ORIGINS=" in template)
     check("install clones every private master repository",
           all(f"git clone --branch master --single-branch https://github.com/MrFaviod/{repo}.git" in install
               for repo in ("hadar-it", "hadar-it-backend", "hadar-it-frontend")))
