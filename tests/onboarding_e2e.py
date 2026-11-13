@@ -690,6 +690,13 @@ class Harness:
             )
         if not FIXTURE_SCRIPT.is_file():
             raise HarnessBlocked(f"fixture provider script is missing: {FIXTURE_SCRIPT}")
+        if self.args.browser:
+            if shutil.which("uv") is None:
+                raise HarnessBlocked(
+                    "uv is required for --browser (uv run --no-project --with playwright)"
+                )
+            if not (ROOT / "tests" / "onboarding_browser.py").is_file():
+                raise HarnessBlocked("tests/onboarding_browser.py is missing")
 
         existing = self.project_resources()
         found = {name: values for name, values in existing.items() if values}
@@ -780,9 +787,8 @@ class Harness:
             "api_without_backend": api.status,
         }
 
-    def step_claim(self) -> dict:
-        anonymous = self.client.request("GET", f"{SETUP_PREFIX}/session", timeout=10)
-        _expect(anonymous.status == 401, f"an anonymous session is refused (got {anonymous.status})")
+    def _enable_claim(self) -> dict:
+        """Issue the one-time credential and wait until the wizard offers it."""
 
         enabled = self.compose(
             "exec",
@@ -819,6 +825,15 @@ class Harness:
         )
         _expect(status.get("state") == "unclaimed", "the wizard now offers the claim step")
         _expect(status.get("setup_enabled") is True, "setup is enabled after enable-claim")
+        return {"credential": credential, "status": status}
+
+    def step_claim(self) -> dict:
+        anonymous = self.client.request("GET", f"{SETUP_PREFIX}/session", timeout=10)
+        _expect(anonymous.status == 401, f"an anonymous session is refused (got {anonymous.status})")
+
+        grant = self._enable_claim()
+        credential = grant["credential"]
+        status = grant["status"]
 
         wrong = self.client.request(
             "POST",
@@ -1079,6 +1094,42 @@ class Harness:
         )
         return {"engine": "postgresql", "service": "postgres", "health": health}
 
+    def _start_api(self) -> dict:
+        """Start the API over the installation file the wizard wrote."""
+
+        started = self.compose(
+            "up",
+            "-d",
+            "--no-build",
+            "--pull",
+            "never",
+            "--no-deps",
+            "backend",
+            timeout=self.args.startup_timeout,
+        )
+        _expect(
+            started.returncode == 0,
+            f"the API did not start ({started.returncode}): "
+            f"{(started.stderr or '').strip()[:300]}",
+        )
+        ready = self.wait_http(
+            "/api/v1/health/ready",
+            lambda response: response.status == 200,
+            timeout=120,
+            description="API readiness through the edge",
+        )
+        checks = ready.json().get("checks") or {}
+        _expect(
+            checks.get("database") == "ok",
+            f"the API reports its database ready (got {checks.get('database')!r})",
+        )
+        _expect(
+            checks.get("migrations") == "ok",
+            f"the wizard left the schema at the current head "
+            f"(got {checks.get('migrations')!r})",
+        )
+        return checks
+
     def setup_mutation(self, path: str, body: dict, timeout: int = 60) -> Response:
         return self.client.request(
             "POST",
@@ -1184,37 +1235,7 @@ class Harness:
         )
 
         # No initialize here: the API must start from the file the wizard wrote.
-        started = self.compose(
-            "up",
-            "-d",
-            "--no-build",
-            "--pull",
-            "never",
-            "--no-deps",
-            "backend",
-            timeout=self.args.startup_timeout,
-        )
-        _expect(
-            started.returncode == 0,
-            f"the API did not start ({started.returncode}): "
-            f"{(started.stderr or '').strip()[:300]}",
-        )
-        ready = self.wait_http(
-            "/api/v1/health/ready",
-            lambda response: response.status == 200,
-            timeout=120,
-            description="API readiness through the edge",
-        )
-        checks = (ready.json().get("checks") or {})
-        _expect(
-            checks.get("database") == "ok",
-            f"the API reports its database ready (got {checks.get('database')!r})",
-        )
-        _expect(
-            checks.get("migrations") == "ok",
-            f"the wizard left the schema at the current head "
-            f"(got {checks.get('migrations')!r})",
-        )
+        checks = self._start_api()
 
         readable = self._json_in(
             "backend",
@@ -2181,6 +2202,147 @@ class Harness:
             self._record(name, "SKIP", reason=reason)
             print(f"SKIP {name}: {reason}")
 
+    # ---------------------------------------------------------------- browser
+    def _browser_phase(
+        self,
+        phase: str,
+        evidence: Path,
+        *,
+        save: Path | None = None,
+        load: Path | None = None,
+        extra_env: dict[str, str] | None = None,
+    ) -> dict:
+        argv = [
+            "uv",
+            "run",
+            "--no-project",
+            "--with",
+            "playwright",
+            "python",
+            str(ROOT / "tests" / "onboarding_browser.py"),
+            "--phase",
+            phase,
+            "--base-url",
+            self.origin,
+            "--evidence",
+            str(evidence),
+            "--mode",
+            self.mode,
+            "--locale",
+            self.args.browser_locale,
+            "--ai-base-url",
+            FIXTURE_BASE_URL,
+            "--ai-model",
+            FIXTURE_MODEL,
+            "--ai-provider",
+            FIXTURE_SERVICE,
+            "--owner-username",
+            "owner",
+            "--owner-display-name",
+            "Installation Owner",
+            "--owner-email",
+            "owner@example.invalid",
+        ]
+        if save is not None:
+            argv += ["--save-storage-state", str(save)]
+        if load is not None:
+            argv += ["--storage-state", str(load)]
+        if self.mode == "prod":
+            argv += ["--resolve", "itsm-e2e.test=127.0.0.1"]
+        env = dict(os.environ)
+        env.update(extra_env or {})
+        result = _run(argv, env, self.args.browser_timeout)
+        evidence.mkdir(parents=True, exist_ok=True)
+        log = evidence / f"{phase}.browser.log"
+        log.write_text(
+            (result.stdout or "") + (result.stderr or ""), encoding="utf-8"
+        )
+        print(f"LOG browser {phase}: {log}")
+        for line in (result.stdout or "").splitlines():
+            if line.startswith("PASS "):
+                print(line)
+        summary_path = evidence / f"{phase}.json"
+        summary: dict = {}
+        if summary_path.is_file():
+            try:
+                summary = json.loads(summary_path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                summary = {}
+        if result.returncode != 0:
+            detail = str(summary.get("error") or "").strip()
+            if not detail:
+                tail = [
+                    line.strip()
+                    for line in (result.stderr or "").splitlines()
+                    if line.strip()
+                ]
+                detail = tail[-1] if tail else f"exit {result.returncode}"
+            raise StepFailure(
+                f"browser {phase} failed: {detail[:600]} (log {log})"
+            )
+        return {
+            "phase": phase,
+            "checks": summary.get("checks"),
+            "screenshots": len(summary.get("screenshots") or []),
+            "log": str(log),
+        }
+
+    def _run_browser(self) -> None:
+        evidence = Path(
+            self.args.browser_evidence
+            or (Path(tempfile.gettempdir()) / "onboarding-browser")
+        ).expanduser() / self.mode
+        evidence.mkdir(parents=True, exist_ok=True)
+        state = self.temp_dir / "browser-storage-state.json"
+        print(f"BROWSER {self.mode}: {self.origin} -> {evidence}")
+        try:
+            boot = self.step_boot()
+            self._record(
+                "browser-boot",
+                "PASS",
+                observations={"edge": self.origin, "evidence": str(evidence), **boot},
+            )
+            claim = self._enable_claim()
+            database = self._start_database()
+            owner_password = secrets.token_urlsafe(24)
+            setup = self._browser_phase(
+                "setup",
+                evidence,
+                save=state,
+                extra_env={
+                    "SETUP_CLAIM_CREDENTIAL": claim["credential"],
+                    "SETUP_DATABASE_URL": self._database_url(),
+                    "SETUP_DATABASE_ENGINE": (
+                        "sqlite" if database["engine"] == "sqlite" else "postgresql"
+                    ),
+                    "AI_FIXTURE_KEY": self.provider_key,
+                },
+            )
+            self._record("browser-setup", "PASS", observations=setup)
+            api = self._start_api()
+            self._start_worker()
+            self._record(
+                "browser-api",
+                "PASS",
+                observations={"database": api.get("database"), "migrations": api.get("migrations")},
+            )
+            finish = self._browser_phase(
+                "finish",
+                evidence,
+                load=state,
+                extra_env={"SETUP_OWNER_PASSWORD": owner_password},
+            )
+            self._record("browser-finish", "PASS", observations=finish)
+        except StepBlocked as exc:
+            self.blocked_steps.append("browser")
+            self.blocked_sources["browser"] = str(exc)
+            self._record("browser", "BLOCKED", reason=str(exc))
+            print(f"BLOCKED browser: {exc}", file=sys.stderr)
+        except StepFailure as exc:
+            self.failed_steps.append("browser")
+            self._record("browser", "FAIL", reason=str(exc))
+            print(f"FAIL browser: {exc}", file=sys.stderr)
+
     # ---------------------------------------------------------------- lifecycle
     def _finish(self) -> None:
         keep = bool(self.args.keep_on_failure and self.failed_steps)
@@ -2241,7 +2403,7 @@ class Harness:
         overall = {0: "passed", 1: "failed"}.get(self.exit_code, "blocked")
         report = {
             "harness": "onboarding-e2e",
-            "version": "t7-storage-owner",
+            "version": "t7-browser",
             "status": overall,
             "mode": self.mode,
             "project": self.project,
@@ -2273,7 +2435,10 @@ class Harness:
         try:
             self.preflight()
             self.exit_code = 1
-            self._run_steps()
+            if self.args.browser:
+                self._run_browser()
+            else:
+                self._run_steps()
             if self.blocked_steps and not self.failed_steps:
                 self.exit_code = 2
         except HarnessBlocked as exc:
@@ -2302,6 +2467,12 @@ class Harness:
             )
             print(f"RESULT blocked: {self.mode} ({detail or 'environment cannot assert the run'})")
             return 2
+        if self.args.browser:
+            print(
+                f"RESULT passed: {self.mode} "
+                f"({len(self.steps)} browser step(s), real Chromium)"
+            )
+            return 0
         skipped = [name for name in STUB_STEPS if name in self.args.steps]
         print(
             f"RESULT passed: {self.mode} "
@@ -2368,6 +2539,30 @@ def main(argv: list[str] | None = None) -> int:
         type=int,
         default=180,
         help="bounded wait for the stack and the wizard, in seconds (default 180)",
+    )
+    parser.add_argument(
+        "--browser",
+        action="store_true",
+        help="drive the wizard in Chromium against the disposable stack "
+        "instead of walking the API steps",
+    )
+    parser.add_argument(
+        "--browser-evidence",
+        default=None,
+        help="directory for per-phase screenshots, summaries and logs "
+        "(default: $TMPDIR/onboarding-browser); a <mode> subdirectory is added",
+    )
+    parser.add_argument(
+        "--browser-locale",
+        choices=("en", "es"),
+        default="en",
+        help="wizard locale the browser asks for (default en)",
+    )
+    parser.add_argument(
+        "--browser-timeout",
+        type=int,
+        default=900,
+        help="bounded wait for one browser phase, in seconds (default 900)",
     )
     args = parser.parse_args(argv)
     args.steps = _parse_steps(args.steps, parser)
