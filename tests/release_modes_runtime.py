@@ -75,8 +75,8 @@ MODES = ("dev", "prod", "demo")
 SELINUX_LEVELS = {"dev": "s0:c410", "prod": "s0:c411", "demo": "s0:c412"}
 
 EXPECTED_SERVICES = {
-    "dev": {"initialize", "backend", "worker", "frontend"},
-    "prod": {"initialize", "backend", "worker", "frontend"},
+    "dev": {"initialize", "backend", "worker", "frontend", "setup"},
+    "prod": {"initialize", "backend", "worker", "frontend", "setup"},
     "demo": {"initialize", "backend", "frontend"},
 }
 
@@ -192,6 +192,10 @@ def _override_document(mode: str) -> str:
     if mode != "demo":
         lines += ["  worker:", f"    image: {IMAGE_BACKEND}"]
     lines += ["  frontend:", f"    image: {IMAGE_FRONTEND}"]
+    if mode != "demo":
+        # Setup is absent from demo. Its own command stays; only the image tag
+        # is pinned so the verification build is the one under test.
+        lines += ["  setup:", f"    image: {IMAGE_BACKEND}"]
     if mode == "prod":
         # Only `prod` declares the backup service; adding it elsewhere would
         # create a service instead of overriding an existing one.
@@ -392,6 +396,11 @@ def _check_render(model: dict, mode: str, project: str, api_port: int, frontend_
         services["frontend"]["image"] == IMAGE_FRONTEND,
         f"{mode}: frontend image is {IMAGE_FRONTEND}",
     )
+    if mode != "demo":
+        _expect(
+            services["setup"]["image"] == IMAGE_BACKEND,
+            f"{mode}: setup image is {IMAGE_BACKEND}",
+        )
     expected_initialize = IMAGE_OPS if mode == "prod" else IMAGE_BACKEND
     _expect(
         services["initialize"]["image"] == expected_initialize,
@@ -403,7 +412,7 @@ def _check_render(model: dict, mode: str, project: str, api_port: int, frontend_
             f"{mode}: worker image is {IMAGE_BACKEND}",
         )
 
-    for name in ("initialize", "backend", "worker"):
+    for name in ("initialize", "backend", "worker", "setup"):
         if name not in services:
             continue
         _expect(
@@ -424,6 +433,44 @@ def _check_render(model: dict, mode: str, project: str, api_port: int, frontend_
         )
 
     _expect(
+        "depends_on" not in services["frontend"],
+        f"{mode}: the UI edge boots without waiting for the API",
+    )
+    if mode != "demo":
+        setup = services["setup"]
+        _expect(
+            "depends_on" not in setup,
+            f"{mode}: setup waits for no other service",
+        )
+        _expect(
+            _published(setup) == set(),
+            f"{mode}: setup publishes no host port",
+        )
+        _expect(
+            setup.get("read_only") is True,
+            f"{mode}: setup root filesystem is read-only",
+        )
+        _expect(
+            setup.get("cap_drop") == ["ALL"],
+            f"{mode}: setup drops every capability",
+        )
+        setup_mounts = _mount_targets(setup)
+        _expect(
+            set(setup_mounts) == {"/var/lib/itsm-setup"},
+            f"{mode}: setup writes only its private state volume",
+        )
+        _expect(
+            all(mount.get("type") == "volume" for mount in setup_mounts.values())
+            and "docker.sock" not in json.dumps(setup_mounts),
+            f"{mode}: setup mounts no host path and no Docker socket",
+        )
+        _expect(
+            setup.get("environment", {}).get("ITSM_SETUP_STATE_DIR")
+            == "/var/lib/itsm-setup",
+            f"{mode}: setup is told where its state volume is",
+        )
+
+    _expect(
         _published(services["backend"]) == {("127.0.0.1", str(api_port), "8000")},
         f"{mode}: backend publishes only 127.0.0.1:{api_port}",
     )
@@ -435,7 +482,7 @@ def _check_render(model: dict, mode: str, project: str, api_port: int, frontend_
     # Every container that mounts this project's data must carry the same
     # reserved SELinux level, otherwise a shared volume becomes unreadable.
     level_label = f"label=level:{SELINUX_LEVELS[mode]}"
-    for name in ("initialize", "backend", "worker"):
+    for name in ("initialize", "backend", "worker", "setup"):
         if name not in services:
             continue
         _expect(

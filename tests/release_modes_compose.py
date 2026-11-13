@@ -63,6 +63,29 @@ def main():
             assert services["initialize"]["environment"]["ITSM_OPS_STATUS_PATH"] == (
                 "/data/backup-status/status.json"
             )
+        # Setup must answer before the database and the API exist. It shares the
+        # API image but none of its dependencies, ports or Docker access.
+        if mode == "demo":
+            assert "setup" not in services, "demo must not offer the claim flow"
+        else:
+            setup = services["setup"]
+            assert setup["image"] == "itsm-backend:0.1.0"
+            assert setup["command"] == ["python", "-m", "itsm.setup"]
+            assert "depends_on" not in setup, "setup cannot wait on anything"
+            assert not setup.get("ports"), "setup is reached only through the edge"
+            assert setup["read_only"] is True
+            assert setup["cap_drop"] == ["ALL"]
+            assert setup["pids_limit"] == 64
+            assert "/tmp" in str(setup["tmpfs"])
+            assert setup["environment"]["RELEASE_MODE"] == mode
+            assert setup["environment"]["ITSM_SETUP_STATE_DIR"] == "/var/lib/itsm-setup"
+            assert [mount["target"] for mount in setup["volumes"]] == ["/var/lib/itsm-setup"]
+            assert all(mount["type"] == "volume" for mount in setup["volumes"])
+            assert "docker.sock" not in json.dumps(setup)
+            assert any("label=level:s0:c100" in value for value in setup["security_opt"])
+        # The UI edge boots alone: a fresh installation has no API to wait for,
+        # and the wizard is served through this same edge.
+        assert "depends_on" not in services["frontend"]
         # Every application container: read-only root, /tmp as tmpfs, bounded PIDs.
         # Writable state stays on the named volumes; no memory limit is asserted
         # because the default is unlimited (operator knob ITSM_APP_MEM_LIMIT).
