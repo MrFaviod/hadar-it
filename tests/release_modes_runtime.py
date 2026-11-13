@@ -75,8 +75,8 @@ MODES = ("dev", "prod", "demo")
 SELINUX_LEVELS = {"dev": "s0:c410", "prod": "s0:c411", "demo": "s0:c412"}
 
 EXPECTED_SERVICES = {
-    "dev": {"initialize", "backend", "worker", "frontend", "setup"},
-    "prod": {"initialize", "backend", "worker", "frontend", "setup"},
+    "dev": {"initialize", "backend", "worker", "frontend", "setup", "setup-volume-init"},
+    "prod": {"initialize", "backend", "worker", "frontend", "setup", "setup-volume-init"},
     "demo": {"initialize", "backend", "frontend"},
 }
 
@@ -200,6 +200,9 @@ def _override_document(mode: str) -> str:
         # Setup is absent from demo. Its own command stays; only the image tag
         # is pinned so the verification build is the one under test.
         lines += ["  setup:", f"    image: {IMAGE_BACKEND}"]
+        # The one-shot initializer shares that image: without the pin it would
+        # still name itsm-backend:0.1.0 and Compose would refuse the stale tag.
+        lines += ["  setup-volume-init:", f"    image: {IMAGE_BACKEND}"]
     if mode == "prod":
         # Only `prod` declares the backup service; adding it elsewhere would
         # create a service instead of overriding an existing one.
@@ -443,8 +446,17 @@ def _check_render(model: dict, mode: str, project: str, api_port: int, frontend_
     if mode != "demo":
         setup = services["setup"]
         _expect(
-            "depends_on" not in setup,
-            f"{mode}: setup waits for no other service",
+            set(setup.get("depends_on") or {}) == {"setup-volume-init"},
+            f"{mode}: setup waits only for its volume initializer",
+        )
+        _expect(
+            setup["depends_on"]["setup-volume-init"]["condition"]
+            == "service_completed_successfully",
+            f"{mode}: setup starts after the volume initializer succeeded",
+        )
+        _expect(
+            setup.get("user") == "10001:10001",
+            f"{mode}: setup runs as 10001:10001, never root",
         )
         _expect(
             _published(setup) == set(),
@@ -457,6 +469,23 @@ def _check_render(model: dict, mode: str, project: str, api_port: int, frontend_
         _expect(
             setup.get("cap_drop") == ["ALL"],
             f"{mode}: setup drops every capability",
+        )
+        init = services["setup-volume-init"]
+        _expect(
+            init.get("image") == setup.get("image"),
+            f"{mode}: the volume initializer shares the setup image",
+        )
+        _expect(
+            init.get("user") == "0:0"
+            and init.get("network_mode") == "none"
+            and init.get("read_only") is True
+            and init.get("restart") == "no",
+            f"{mode}: the volume initializer is a bounded offline one-shot",
+        )
+        _expect(
+            init.get("cap_drop") == ["ALL"]
+            and {"CHOWN", "FOWNER"} <= set(init.get("cap_add") or []),
+            f"{mode}: the volume initializer holds only CHOWN and FOWNER",
         )
         setup_mounts = _mount_targets(setup)
         _expect(
@@ -486,7 +515,7 @@ def _check_render(model: dict, mode: str, project: str, api_port: int, frontend_
     # Every container that mounts this project's data must carry the same
     # reserved SELinux level, otherwise a shared volume becomes unreadable.
     level_label = f"label=level:{SELINUX_LEVELS[mode]}"
-    for name in ("initialize", "backend", "worker", "setup"):
+    for name in ("initialize", "backend", "worker", "setup", "setup-volume-init"):
         if name not in services:
             continue
         _expect(
@@ -816,6 +845,42 @@ def _check_setup_edge(base: str, mode: str) -> None:
     raise VerificationError(f"the setup wizard did not answer through the edge ({last})")
 
 
+def _check_setup_identity(
+    project: str, mode: str, override: Path, env: dict[str, str]
+) -> None:
+    """The running wizard and its state volume are unprivileged.
+
+    Compose rendering proves the requested user; only `docker inspect` and a
+    stat inside the container prove what the kernel actually applied.
+    """
+    result = _run(_compose_argv(project, mode, override, "ps", "-q", "setup"), env, 30)
+    containers = [
+        line.strip() for line in (result.stdout or "").splitlines() if line.strip()
+    ]
+    _expect(bool(containers), f"{mode}: the setup container is running")
+    inspect = _run(
+        ["docker", "inspect", "--format", "{{.Config.User}}", containers[0]], env, 30
+    )
+    observed_user = (inspect.stdout or "").strip()
+    _expect(
+        inspect.returncode == 0 and observed_user == "10001:10001",
+        f"{mode}: docker inspect reports setup user 10001:10001 (got {observed_user!r})",
+    )
+    stat = _run(
+        _compose_argv(
+            project, mode, override, "exec", "-T", "setup",
+            "stat", "-c", "%a %u:%g", "/var/lib/itsm-setup",
+        ),
+        env,
+        30,
+    )
+    observed_mode = (stat.stdout or "").strip()
+    _expect(
+        stat.returncode == 0 and observed_mode == "700 10001:10001",
+        f"{mode}: the setup state volume is 0700 owned by 10001 (got {observed_mode!r})",
+    )
+
+
 def _check_frontend(base: str) -> None:
     deadline = time.monotonic() + 30
     last = "no response"
@@ -955,6 +1020,7 @@ def run_mode(mode: str, run_id: str, *, structural_only: bool, ready_timeout: in
         _check_frontend(frontend_base)
         if mode != "demo":
             _check_setup_edge(frontend_base, mode)
+            _check_setup_identity(project, mode, override, env)
 
         if mode == "dev":
             _check_dev_runtime(frontend_base, origin, dev_password, ready)

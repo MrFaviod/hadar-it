@@ -107,6 +107,10 @@ services:
   setup:
     profiles: [setup-excluded]
 
+  # The wizard's one-shot volume initializer follows it out of demo.
+  setup-volume-init:
+    profiles: [setup-excluded]
+
   # Optional synthetic scraper (S17): current UUIDs are discovered over the
   # private backend route every 15s, including after hourly resets. No host
   # network or published ports; no alerting/rules/remote_write. Storage is tmpfs.

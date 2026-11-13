@@ -153,23 +153,52 @@ services:
     command: [alembic, upgrade, head]
 
   # First-start wizard. A separate process on purpose: it must answer while the
-  # database and the API are absent, so it depends on no other service and never
-  # imports a module that opens the database. It is not published on the host;
-  # the frontend edge proxies /api/setup/v1/ to it on the Compose network. Its
-  # only writable state is the private volume below.
+  # database and the API are absent, so it never waits on them and never imports
+  # a module that opens the database. Its only prerequisite is the one-shot
+  # volume initializer below. It is not published on the host; the frontend edge
+  # proxies /api/setup/v1/ to it on the Compose network. Its only writable state
+  # is the private volume below.
+  #
+  # Docker creates that named volume root-owned (0755) because the image ships
+  # no /var/lib/itsm-setup directory. `setup-volume-init` fixes ownership in a
+  # throwaway root container; the wizard itself runs unprivileged.
+  setup-volume-init:
+    image: itsm-backend:0.1.0
+    # Same context and tag as the API; the image already exists after the build.
+    build: ./backend
+    # One-shot: chown/chmod the volume, then exit. No network, no shell service.
+    user: "0:0"
+    command:
+      - sh
+      - -c
+      - chown 10001:10001 /var/lib/itsm-setup && chmod 0700 /var/lib/itsm-setup
+    network_mode: none
+    volumes:
+      - setup-state:/var/lib/itsm-setup
+    security_opt:
+      - "no-new-privileges:true"
+      # The volume is shared with `setup`, so it needs the same installation level.
+      - "label=level:${ITSM_SELINUX_LEVEL:?Reserve an installation-specific SELinux MCS level before running Compose}"
+    cap_drop: [ALL]
+    # CHOWN changes the owner; FOWNER lets the following chmod succeed after the
+    # directory belongs to 10001. DAC_OVERRIDE is not needed (root owns it then).
+    cap_add: [CHOWN, FOWNER]
+    read_only: true
+    pids_limit: 16
+    restart: "no"
+
   setup:
     image: itsm-backend:0.1.0
     # Same context and tag as the API; Dockerfile.ops keeps building on it.
     build: ./backend
     init: true
     command: [python, -m, itsm.setup]
-    # The image ends with USER 10001:10001 but has no /var/lib/itsm-setup
-    # directory, so Docker creates the named volume root-owned (0755). The
-    # bootstrap store requires that directory to be 0700 and `cap_drop: ALL`
-    # denies chmod/chown to a non-owner, so the wizard must own the volume.
-    # Root owns it; every other hardening rule (read-only root, no caps,
-    # no published port) still applies.
-    user: "0:0"
+    # The image ends with USER 10001:10001, which is also the runtime user here:
+    # only the init container above ever holds a capability.
+    user: "10001:10001"
+    depends_on:
+      setup-volume-init:
+        condition: service_completed_successfully
     environment:
       RELEASE_MODE: ${RELEASE_MODE:?Set RELEASE_MODE to dev, prod or demo}
       ITSM_SETUP_STATE_DIR: /var/lib/itsm-setup

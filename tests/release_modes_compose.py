@@ -95,11 +95,22 @@ def main():
         # API image but none of its dependencies, ports or Docker access.
         if mode == "demo":
             assert "setup" not in services, "demo must not offer the claim flow"
+            assert "setup-volume-init" not in services, (
+                "demo must not carry the wizard's volume initializer"
+            )
         else:
             setup = services["setup"]
             assert setup["image"] == "itsm-backend:0.1.0"
             assert setup["command"] == ["python", "-m", "itsm.setup"]
-            assert "depends_on" not in setup, "setup cannot wait on anything"
+            # The one-shot initializer is the only prerequisite: the wizard must
+            # not wait on the API, the datastore or the preparation gate.
+            assert set(setup["depends_on"]) == {"setup-volume-init"}, (
+                "setup waits only for its volume initializer"
+            )
+            assert (
+                setup["depends_on"]["setup-volume-init"]["condition"]
+                == "service_completed_successfully"
+            )
             assert not setup.get("ports"), "setup is reached only through the edge"
             assert setup["read_only"] is True
             assert setup["cap_drop"] == ["ALL"]
@@ -107,10 +118,25 @@ def main():
             assert "/tmp" in str(setup["tmpfs"])
             assert setup["environment"]["RELEASE_MODE"] == mode
             assert setup["environment"]["ITSM_SETUP_STATE_DIR"] == "/var/lib/itsm-setup"
-            # The backend image has no /var/lib/itsm-setup directory, so Docker
-            # creates the named volume root-owned. Only its owner can chmod it to
-            # 0700 with every capability dropped, so the wizard owns the volume.
-            assert setup.get("user") == "0:0", "the wizard must own its state volume"
+            # The wizard never holds root or a capability: the one-shot init
+            # container below owns the volume instead.
+            assert setup.get("user") == "10001:10001", "the wizard runs unprivileged"
+            # One-shot volume initializer: same image, root only long enough to
+            # chown/chmod the state volume, no network, no restart.
+            init = services["setup-volume-init"]
+            assert init["image"] == setup["image"]
+            assert init["user"] == "0:0"
+            assert init["command"][:2] == ["sh", "-c"]
+            assert "chown 10001:10001 /var/lib/itsm-setup" in init["command"][2]
+            assert "chmod 0700 /var/lib/itsm-setup" in init["command"][2]
+            assert init["network_mode"] == "none"
+            assert init["read_only"] is True
+            assert init["cap_drop"] == ["ALL"]
+            assert {"CHOWN", "FOWNER"} <= set(init["cap_add"])
+            assert set(init["cap_add"]) <= {"CHOWN", "FOWNER", "DAC_OVERRIDE"}
+            assert init["restart"] == "no"
+            assert [mount["target"] for mount in init["volumes"]] == ["/var/lib/itsm-setup"]
+            assert any("label=level:s0:c100" in value for value in init["security_opt"])
             if mode == "prod":
                 assert setup["environment"]["ITSM_SETUP_ALLOWED_ORIGINS"] == (
                     "https://test.invalid"
@@ -141,7 +167,6 @@ def main():
         result = compose("prod", omit=(name,))
         assert result.returncode != 0 and name in result.stderr, result.stderr
     print("PASS prod refuses to start without its public URLs")
-
     assert_variable_proxy_pass_keeps_the_uri()
 
 
