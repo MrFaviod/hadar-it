@@ -772,6 +772,46 @@ def _check_demo_runtime(base: str, origin: str) -> None:
     _expect(labels.get("check_type") == "node", "demo: discovery targets node checks")
 
 
+def _check_setup_edge(base: str, mode: str) -> None:
+    """The wizard answers through the edge while the database-backed API is up.
+
+    A setup container that cannot own its state volume crash-loops, and the
+    edge turns that into 502: the shell still loads, so only asking the wizard
+    proves the first-start path works.
+    """
+    allowed = {
+        "state", "mode", "release_mode", "setup_enabled", "claim_available",
+        "backend", "version", "instance_id",
+    }
+    deadline = time.monotonic() + 30
+    last = "no response"
+    while time.monotonic() < deadline:
+        try:
+            response = _request(f"{base}/api/setup/v1/status", timeout=5)
+        except OSError as exc:
+            last = exc.__class__.__name__
+        else:
+            if response.status == 200:
+                payload = response.json()
+                _expect(
+                    isinstance(payload, dict) and set(payload) <= allowed,
+                    "setup: the anonymous status carries only its allowlist",
+                )
+                _expect(
+                    payload.get("release_mode") == mode,
+                    f"setup: status reports release_mode={mode}",
+                )
+                _expect(
+                    payload.get("state") == "disabled"
+                    and payload.get("claim_available") is False,
+                    "setup: a fresh installation offers no claim yet",
+                )
+                return
+            last = f"HTTP {response.status}"
+        time.sleep(2)
+    raise VerificationError(f"the setup wizard did not answer through the edge ({last})")
+
+
 def _check_frontend(base: str) -> None:
     deadline = time.monotonic() + 30
     last = "no response"
@@ -909,6 +949,8 @@ def run_mode(mode: str, run_id: str, *, structural_only: bool, ready_timeout: in
         print(f"PASS {mode}: bounded readiness is green")
         _assert_initialize_succeeded(project, mode, override, env)
         _check_frontend(frontend_base)
+        if mode != "demo":
+            _check_setup_edge(frontend_base, mode)
 
         if mode == "dev":
             _check_dev_runtime(frontend_base, origin, dev_password, ready)
