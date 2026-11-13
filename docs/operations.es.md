@@ -8,6 +8,8 @@ Ejecuta los comandos desde la raíz que contiene `compose.yaml`, `backend/` y `f
 
 Las variables se documentan y se ofrece `.env.example` sin secretos para uso local opcional de Compose con `--env-file .env`; los comandos de abajo mantienen `--env-file /dev/null` para usar solo el entorno. Los comandos deshabilitan explícitamente la carga implícita de `.env` de Compose. Suministra las variables desde el entorno que invoca o desde tu mecanismo aprobado de gestión externa de secretos; no pongas credenciales de producción en Git, en transcripciones de terminal ni en archivos de ejemplo. Codifica con URL las credenciales de las URLs de base de datos. El entorno de los contenedores es visible para los administradores de Docker: esto no es una bóveda de secretos.
 
+La configuración sigue una sola precedencia: entorno del proceso, luego el archivo opcional de instalación `ITSM_INSTALLATION_CONFIG`, luego el valor documentado por defecto. Una variable de entorno presente gana incluso cuando está explícitamente vacía. Ese archivo es un objeto JSON en una ruta absoluta, modo `0600` dentro de un directorio `0700`, nunca un symlink; mantenlo fuera de Git.
+
 Todos los comandos de Compose de este documento se ejecutan en una shell de instalación donde
 el modo de release y su overlay ya están exportados. El modo es obligatorio: nombra el
 proyecto Compose y sus volúmenes, y un valor ausente falla en la interpolación en lugar de
@@ -28,6 +30,8 @@ por modo están en [despliegue por modo](release-modes-deployment.md).
 | `ITSM_AUTH_ORIGIN` | Origen exacto del navegador; valor por defecto de Compose http://localhost:18080. Debe coincidir con el hostname del navegador. |
 | `ITSM_AUTH_COOKIE_SECURE` | `true`; `false` solo de forma explícita para HTTP aislado/local. En cualquier otro caso usa HTTPS. |
 | `ITSM_BOOTSTRAP_PASSWORD` | Contraseña inicial externa para el CLI explícito de administrador; no hay cuenta por defecto. |
+| `ITSM_INSTALLATION_CONFIG` | Ruta absoluta opcional a un archivo JSON de ajustes propiedad de la instalación (0600 en un directorio 0700, sin symlink). Precedencia: entorno > archivo > valor documentado por defecto; un valor de entorno vacío explícito también gana. |
+| `ITSM_AI_CREDENTIAL_KEYS` | Anillo de claves del operador con el que el asistente sella una clave de proveedor de IA; sin él el paso de IA informa la clave ausente y puede posponerse. |
 | `ITSM_SELINUX_LEVEL` | Nivel MCS de SELinux específico de la instalación, obligatorio y compartido por API, worker, migraciones y bootstrap. Reserva categorías distintas por instalación; ver más abajo. No es una credencial. |
 | `ITSM_AGENT_MODEL` | Vacío deshabilita la inferencia; `provider:model` elegido por el servidor, por ejemplo `openai:gpt-4.1-mini` o `anthropic:claude-sonnet-4-5`. |
 | `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` | Credencial externa específica del proveedor; nunca entrada del navegador, configuración confirmada en Git ni argumento de herramienta. |
@@ -157,6 +161,25 @@ local a un único host Docker, compartida entre API y worker, no NFS ni un clús
 El worker por defecto tiene un hilo/proceso; escala solo después de probar la cola, el
 almacenamiento y la idempotencia de negocio. La configuración del dialecto SQL principal no
 es prueba de compatibilidad con el motor vivo; consulta la matriz de validación del backend.
+
+### Primer arranque y el servicio de configuración
+
+Una instalación nueva de `dev` o `prod` arranca el servicio **setup** junto a la API:
+un proceso separado y sin privilegios que sirve el asistente de primer arranque.
+Responde aunque la API y la base de datos no existan, escucha solo en la red del
+proyecto y se alcanza a través del borde del frontend en `/api/setup/v1/`; nunca se
+publica en un puerto del host. No tiene socket de Docker, montaje del sistema de
+archivos del host ni contenedor privilegiado, así que nunca modifica el despliegue:
+registra el reclamo, la elección de IA, la comprobación de almacenamiento y el primer
+propietario en su propio volumen privado.
+
+El operador habilita el asistente con `enable-claim` dentro de ese contenedor,
+completa los pasos en el navegador y `complete` deja de aceptar mutaciones de
+arranque. Un reclamo perdido se reemplaza con `rotate-claim`; `recover` reabre un
+asistente completado sin reiniciar la instalación. `ITSM_AI_CREDENTIAL_KEYS` debe
+estar presente para que el paso de IA selle una clave de proveedor; sin ella el paso
+aún puede posponerse. Quitar o deshabilitar el servicio `setup` tras completar está
+pendiente: hoy sigue ejecutándose, de solo lectura y sin autoridad de arranque.
 
 ### Propiedad de la instalación y operaciones de sistema controladas
 

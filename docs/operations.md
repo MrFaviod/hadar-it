@@ -8,6 +8,8 @@ Run commands from the root checkout containing `compose.yaml`, `backend/` and `f
 
 Configuration uses documented environment variables. A secret-free `.env.example` is provided for optional local Compose use with `--env-file .env`; the shell-only commands below still use `--env-file /dev/null`. Commands explicitly disable Compose's implicit `.env` loading. Supply variables via the calling environment or your approved external secret-management mechanism; do not put production credentials in Git, terminal transcripts or example files. URL-encode credentials in database URLs. Container environment is visible to Docker administrators: this is not a secret vault.
 
+Settings follow one precedence: process environment, then the optional `ITSM_INSTALLATION_CONFIG` installation file, then the documented default. An environment variable that is present wins even when it is explicitly empty. That file is a JSON object at an absolute path, mode `0600` inside a `0700` directory, never a symlink; keep it out of Git.
+
 Every Compose command in this document runs in one installation shell where the release
 mode and its overlay are already exported. The mode is mandatory: it names the Compose
 project and its volumes, and an absent value fails interpolation instead of guessing.
@@ -27,6 +29,8 @@ parts are in [release-mode deployment](release-modes-deployment.md).
 | `ITSM_AUTH_ORIGIN` | Exact browser origin; Compose default http://localhost:18080. Match the browser hostname. |
 | `ITSM_AUTH_COOKIE_SECURE` | true; explicitly false only for isolated/local HTTP. Use HTTPS otherwise. |
 | `ITSM_BOOTSTRAP_PASSWORD` | External initial password for explicit administrator CLI; no default account. |
+| `ITSM_INSTALLATION_CONFIG` | Optional absolute path to a JSON file of installation-owned settings (0600 in a 0700 directory, no symlink). Precedence: environment > file > documented default; an explicit empty environment value still wins. |
+| `ITSM_AI_CREDENTIAL_KEYS` | Operator key ring the setup wizard uses to seal an AI provider key; without it the AI step reports the missing key and can be deferred. |
 | `ITSM_SELINUX_LEVEL` | Required installation-specific SELinux MCS level shared by API, worker, migrations and bootstrap. Reserve distinct categories per installation; see below. Not a credential. |
 | `ITSM_AGENT_MODEL` | Empty disables inference; server-selected `provider:model`, e.g. `openai:gpt-4.1-mini` or `anthropic:claude-sonnet-4-5`. |
 | `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` | Provider-specific external credential; never browser input, committed configuration or a tool argument. |
@@ -138,6 +142,24 @@ docker compose --env-file /dev/null run --rm -e ITSM_BOOTSTRAP_PASSWORD backend 
 ```
 
 SQLite main data persists in `app-data`; task queue/results in `task-data`; opaque files in `attachment-data`. The `dev` and `demo` overlays replace these three mounts with one mode-owned directory: `/data/dev`, and `/data` holding the demo data directory `/data/demo`; see [mode-owned volumes](release-modes-deployment.md#2-one-project-and-one-volume-set-per-mode). These are Docker-managed named volumes, shared by API, migration and worker, without bind-only `:z`/`:Z` suffixes. All consumers must retain the installation's reserved `ITSM_SELINUX_LEVEL` as described above. Preserve SELinux labels on actual project bind mounts; never relabel host `/proc`, `/sys` or `/`. Queue SQLite must remain local to one Docker host, shared between API and worker, not NFS or a multi-host cluster. The default worker has one thread/process; scale only after testing queue/storage and business idempotency. Main SQL dialect configuration is not proof of live engine compatibility; consult the backend validation matrix.
+
+### First start and the setup service
+
+A fresh `dev` or `prod` installation starts the **setup** service next to the API:
+a separate, unprivileged process that serves the first-start wizard. It answers
+while the API and database are absent, listens only on the project network and is
+reached through the frontend edge at `/api/setup/v1/`; it is never published on a
+host port. It holds no Docker socket, no host filesystem mount and no privileged
+container, so it never changes the deployment: it records the claim, the AI
+choice, the storage check and the first owner in its own private volume.
+
+The operator enables the wizard with `enable-claim` inside that container,
+completes the browser steps, and `complete` stops accepting bootstrap mutations.
+A lost claim is replaced with `rotate-claim`; `recover` reopens a completed wizard
+without resetting the installation. `ITSM_AI_CREDENTIAL_KEYS` must be present for
+the AI step to seal a provider key; without it the step can still be deferred.
+Removing or disabling the `setup` service after completion is pending: today it
+keeps running, read-only and without bootstrap authority.
 
 ### Installation ownership and controlled system operations
 

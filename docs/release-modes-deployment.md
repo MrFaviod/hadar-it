@@ -62,9 +62,8 @@ of any mode flow.
 ## 3. Starting a mode
 
 ```bash
-# dev: local SQLite, seeded fictional data, loopback HTTP
+# dev: local SQLite, seeded fictional data, loopback HTTP; owner from the wizard
 RELEASE_MODE=dev \
-ITSM_DEV_ADMIN_PASSWORD=<local dev password> \
 ITSM_SELINUX_LEVEL=<reserved MCS level> \
 docker compose --env-file /dev/null -f compose.yaml -f deploy/compose.dev.yaml up -d
 
@@ -85,6 +84,11 @@ docker compose --env-file /dev/null -f compose.yaml -f deploy/compose.demo.yaml 
 Optional profiles: `tls` (HTTPS entrypoint), `backup` (prod backups),
 `monitoring-demo` (synthetic telemetry), plus the existing `local-postgres`,
 `redis`, `search`, `monitoring*` and `tools` profiles.
+
+A fresh `dev` or `prod` installation starts ownerless: complete the setup wizard
+through the frontend edge, or use the explicit alternatives — `dev` accepts
+`ITSM_DEV_ADMIN_PASSWORD` for the headless seed, and `prod` accepts
+`bootstrap-superadmin` in the operations guide.
 
 On a fresh checkout, build `backend` before a production `up`: the production
 `initialize` image is `itsm-ops:0.1.0`, built `FROM itsm-backend:0.1.0` (section 6).
@@ -107,7 +111,7 @@ substitute for one. Use the process environment.
 | `ITSM_DATABASE_URL` | overlay default `sqlite:////data/dev/dev.db` | **required** | overlay default `sqlite:////data/demo/demo.db` |
 | `ITSM_AUTH_ORIGIN` | default `http://localhost:18080` | **required**, https | **required**, exact public origin |
 | `ITSM_AUTH_COOKIE_SECURE` | `false` (loopback HTTP only) | `true` | base default `true` |
-| `ITSM_DEV_ADMIN_PASSWORD` | **required** by overlay and `prepare` | – | – |
+| `ITSM_DEV_ADMIN_PASSWORD` | optional: headless `dev.admin` seed; unset starts the wizard | – | – |
 | `ITSM_DEMO_DATA_DIRECTORY` | – | – | `/data/demo` |
 | `ITSM_OPS_BACKUP_ROOT` | – | `/data/backups` (backup service) | – |
 | `ITSM_OPS_RETENTION_KEEP` | – | default `7` | – |
@@ -135,12 +139,31 @@ project; the API never starts against unprepared data.
 
 | Mode | What `prepare` does |
 |---|---|
-| `dev` | migrations, claim the database for `dev`, create the explicit dev administrator, seed the fictional dataset (idempotent) |
+| `dev` | migrations, claim the database for `dev`, seed the fictional dataset (idempotent); create the `dev.admin` administrator only when `ITSM_DEV_ADMIN_PASSWORD` is set |
 | `prod` | empty database: migrate to head; existing database: guarded upgrade (preflight, verified backup, Alembic, post-upgrade verification) |
 | `demo` | migrate, claim the database for demo, validate the owned data directory, seed the fictional dataset and the `admin`/`admin` visitor (idempotent) |
 
 A failure in any of these is a stopped deployment, not a partially prepared one:
 production keeps its data and reports the backup and restore command.
+
+### The setup service
+
+`setup` is a separate, unprivileged Compose service (`python -m itsm.setup`) that
+serves the first-start wizard. It depends only on initializing its private state
+volume, never on the API or database, and it answers while both are absent. It has
+no Docker socket, no host path and no published port: the frontend edge proxies
+`/api/setup/v1/` to it. Its only writable state is the setup volume; it never
+edits this deployment.
+
+The service starts disabled. The operator enables the wizard with
+`python -m itsm.setup.cli enable-claim` inside the container, completes claim, AI,
+storage and owner in the browser, and `complete` stops accepting bootstrap
+mutations; `rotate-claim` replaces a lost claim and `recover` reopens a completed
+wizard. The AI step needs `ITSM_AI_CREDENTIAL_KEYS` to seal a provider key and
+can be deferred without it. Production narrows the wizard origin with
+`ITSM_SETUP_ALLOWED_ORIGINS`, derived from `ITSM_AUTH_ORIGIN` in the overlay.
+Removing or disabling `setup` after completion is pending: today it keeps
+running, read-only and without bootstrap authority.
 
 ## 6. Production upgrade and backups
 
@@ -224,7 +247,7 @@ measure the host or real devices.
 | Aspect | `dev` | `prod` | `demo` |
 |---|---|---|---|
 | Database | owned SQLite under `/data/dev` | external, required URL | owned SQLite under `/data/demo` |
-| Initial data | seeded fictional dataset + dev admin | empty, real data only | seeded fictional dataset + `admin`/`admin` |
+| Initial data | seeded fictional dataset; owner from the wizard or the headless `dev.admin` seed | empty, real data only | seeded fictional dataset + `admin`/`admin` |
 | Sessions | loopback HTTP, cookies not Secure | Secure cookies, exact https origin | Secure cookies, exact public origin |
 | Destructive reset | manual `itsm.devtools reset`, guarded | not allowed | automatic every 60 minutes, in-process |
 | Task consumer | worker | worker | none by default (worker behind `demo-external-consumer`) |
