@@ -10,10 +10,15 @@ network. It then walks the implemented onboarding steps:
     claim     enable-claim, a rejected credential, the real claim and a session
     ai        configure the fixture provider and prove get_setup_status ran
     restart   state and session survive a setup container restart
+    storage   start the stack's own database, classify it empty, prepare it,
+              and prove the API, the worker and the gate read the private
+              settings file the wizard wrote
+    owner     create the first owner, log in to the normal API as superadmin,
+              and read the transferred AI provider back through that API
 
-The remaining steps (storage, owner, configuration, verify, complete, recovery,
-docs-in-image) are declared stubs: they print ``SKIP`` and are listed in the
-report. A stub never passes.
+The remaining steps (configuration, verify, complete, recovery, docs-in-image)
+are declared stubs: they print ``SKIP`` and are listed in the report. A stub
+never passes.
 
 Boundaries that are deliberate:
 
@@ -44,6 +49,7 @@ harness at all.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import http.cookiejar
 import json
 import os
@@ -58,6 +64,7 @@ import urllib.error
 import urllib.request
 from datetime import UTC, datetime
 from pathlib import Path
+from urllib.parse import quote
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE_SCRIPT = ROOT / "tests" / "fixtures" / "ai_provider_fixture.py"
@@ -66,15 +73,50 @@ SETUP_PREFIX = "/api/setup/v1"
 COOKIE_NAME = "itsm_setup_session"
 CSRF_HEADER = "X-CSRF-Token"
 
+# The private settings file the wizard writes and every other process reads.
+INSTALLATION_DIR = "/data/installation"
+INSTALLATION_FILE = "/data/installation/installation.json"
+DEV_DATABASE_URL = "sqlite:////data/dev/dev.db"
+PROD_DATABASE_HOST = "postgres"
+PROD_DATABASE_NAME = "itsm"
+DEV_DATA_INITIALIZER = "e2e-dev-data-init"
+
+# Read-only proof from inside the prepared API container: how many human
+# identities exist and how many of them are superadmins. It opens its settings
+# the same way the API does, so a file the process cannot read fails here.
+HUMAN_COUNT_SCRIPT = """import json
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
+from itsm.config import get_settings
+from itsm.database import create_engine_from_settings
+from itsm.identity.models import Identity
+from itsm.identity.permissions import HUMAN_ACTOR_KIND
+
+engine = create_engine_from_settings(get_settings())
+with Session(engine) as db:
+    humans = db.scalar(
+        select(func.count())
+        .select_from(Identity)
+        .where(Identity.actor_kind == HUMAN_ACTOR_KIND)
+    )
+    superadmins = db.scalar(
+        select(func.count())
+        .select_from(Identity)
+        .where(
+            Identity.actor_kind == HUMAN_ACTOR_KIND,
+            Identity.role_id == "superadmin",
+        )
+    )
+print(json.dumps({"humans": humans, "superadmins": superadmins}))
+"""
+
 FIXTURE_SERVICE = "ai-fixture"
 FIXTURE_PORT = 8080
 FIXTURE_MODEL = "probe-model"
 FIXTURE_BASE_URL = f"http://{FIXTURE_SERVICE}:{FIXTURE_PORT}/v1"
 
-STEP_ORDER = ("boot", "claim", "ai", "restart")
+STEP_ORDER = ("boot", "claim", "ai", "restart", "storage", "owner")
 STUB_STEPS: dict[str, str] = {
-    "storage": "not implemented yet; waits for the storage step (T3b)",
-    "owner": "not implemented yet; waits for the owner step (T3b)",
     "configuration": "not implemented yet; waits for the configuration step (T5)",
     "verify": "not implemented yet; waits for the verified transfer step (T5)",
     "complete": "not implemented yet; waits for the completion step (T6)",
@@ -293,7 +335,16 @@ class Harness:
         else:
             # The same explicit values tests/release_modes_runtime.py supplies:
             # a project-owned SQLite file and the edge as the public origin.
-            env["ITSM_DATABASE_URL"] = "sqlite:////data/app/prod.db"
+            # The stack's own postgres service is started by the storage step.
+            # compose.prod.yaml requires an explicit production database, so the
+            # environment carries the same candidate the wizard is given. The API
+            # still has to read it back through the shared settings volume; the
+            # dev mode is where the file alone drives the process.
+            password = secrets.token_urlsafe(24)
+            env["ITSM_POSTGRES_PASSWORD"] = password
+            env["ITSM_DATABASE_URL"] = (
+                f"postgresql+psycopg://itsm:{password}@postgres:5432/itsm"
+            )
             env["ITSM_REPORT_BASE_URL"] = self.origin
             env["ITSM_MONITORING_PUBLIC_URL"] = self.origin
         return env
@@ -317,10 +368,57 @@ class Harness:
             "      # variable names so no credential is ever written to disk.",
             "      ITSM_AI_CREDENTIAL_KEYS: ${ITSM_AI_CREDENTIAL_KEYS:-}",
             "      ITSM_AI_PERSONAL_PRIVATE_ENDPOINTS: ${ITSM_AI_PERSONAL_PRIVATE_ENDPOINTS:-}",
+        ]
+        if self.mode == "dev":
+            # The wizard needs a writable directory for the dev SQLite target.
+            # A root one-shot owns it exactly like setup-volume-init owns the
+            # wizard state, and the API reads the same volume.
+            lines += [
+                "    volumes:",
+                "      - dev-data:/data/dev",
+            ]
+        lines += [
             "  setup-volume-init:",
             f"    image: {self.backend_image}",
             "  frontend:",
             f"    image: {self.frontend_image}",
+        ]
+        if self.mode == "dev":
+            lines += [
+                f"  {DEV_DATA_INITIALIZER}:",
+                f"    image: {self.backend_image}",
+                '    user: "0:0"',
+                '    command: [sh, -c, "chown 10001:10001 /data/dev && chmod 0700 /data/dev"]',
+                "    network_mode: none",
+                "    volumes:",
+                "      - dev-data:/data/dev",
+                '    security_opt: ["no-new-privileges:true", "label=level:${ITSM_SELINUX_LEVEL:-}"]',
+                "    cap_drop: [ALL]",
+                "    cap_add: [CHOWN, FOWNER]",
+                "    read_only: true",
+                '    restart: "no"',
+                "    pids_limit: 16",
+            ]
+        if self.mode == "dev":
+            # Dev has no database env at all: the API must read the settings file
+            # the wizard wrote, and an explicit variable would win over that file.
+            for name in ("backend", "worker"):
+                lines += [
+                    f"  {name}:",
+                    f"    image: {self.backend_image}",
+                    "    environment:",
+                    "      ITSM_DATABASE_URL: null",
+                ]
+            lines += [
+                "  initialize:",
+                "    environment:",
+                "      ITSM_DATABASE_URL: null",
+            ]
+        else:
+            # Prod keeps its required explicit URL; only the image is pinned.
+            for name in ("backend", "worker"):
+                lines += [f"  {name}:", f"    image: {self.backend_image}"]
+        lines += [
             f"  {FIXTURE_SERVICE}:",
             f"    image: {self.backend_image}",
             "    command: [python, /opt/itsm-fixture/ai_provider_fixture.py]",
@@ -340,14 +438,12 @@ class Harness:
         return "\n".join(lines) + "\n"
 
     # ------------------------------------------------------------------ docker
-    def compose_argv(self, *args: str) -> list[str]:
+    def compose_argv(self, *args: str, profiles: tuple[str, ...] = ()) -> list[str]:
+        argv = ["docker", "compose", "--env-file", "/dev/null", "--project-name", self.project]
+        for profile in profiles:
+            argv += ["--profile", profile]
         return [
-            "docker",
-            "compose",
-            "--env-file",
-            "/dev/null",
-            "--project-name",
-            self.project,
+            *argv,
             "-f",
             "compose.yaml",
             "-f",
@@ -357,8 +453,14 @@ class Harness:
             *args,
         ]
 
-    def compose(self, *args: str, timeout: int = 60, check: bool = False):
-        result = _run(self.compose_argv(*args), self.env, timeout)
+    def compose(
+        self,
+        *args: str,
+        timeout: int = 60,
+        check: bool = False,
+        profiles: tuple[str, ...] = (),
+    ):
+        result = _run(self.compose_argv(*args, profiles=profiles), self.env, timeout)
         if check and result.returncode != 0:
             raise StepFailure(
                 f"docker compose {' '.join(args[:2])} failed ({result.returncode}): "
@@ -812,11 +914,399 @@ class Harness:
             "session": session_after.status,
         }
 
+    # ---------------------------------------------------------------- storage
+    def _database_url(self) -> str:
+        """The candidate the operator would type into the wizard."""
+
+        if self.mode == "dev":
+            return DEV_DATABASE_URL
+        password = quote(self.env["ITSM_POSTGRES_PASSWORD"], safe="")
+        return (
+            f"postgresql+psycopg://itsm:{password}@{PROD_DATABASE_HOST}:5432/"
+            f"{PROD_DATABASE_NAME}"
+        )
+
+    def _start_database(self) -> dict:
+        """Start the stack's own database and leave it ready to be probed."""
+
+        if self.mode == "dev":
+            # The wizard needs a writable directory for the dev SQLite target;
+            # the one-shot owns the volume exactly like setup-volume-init owns
+            # the wizard state, and the API reads the same volume.
+            prepared = self.compose(
+                "run", "--rm", "--no-deps", DEV_DATA_INITIALIZER, timeout=120
+            )
+            _expect(
+                prepared.returncode == 0,
+                f"the dev data volume could not be prepared ({prepared.returncode}): "
+                f"{(prepared.stderr or '').strip()[:300]}",
+            )
+            return {"engine": "sqlite", "service": DEV_DATA_INITIALIZER}
+
+        started = self.compose(
+            "up",
+            "-d",
+            "--no-build",
+            "--pull",
+            "never",
+            "postgres",
+            profiles=("local-postgres",),
+            timeout=self.args.startup_timeout,
+        )
+        _expect(
+            started.returncode == 0,
+            f"the stack's postgres service did not start ({started.returncode}): "
+            f"{(started.stderr or '').strip()[:300]}",
+        )
+        container = self.container_id("postgres")
+        deadline = time.monotonic() + 120
+        health = self.container_health(container)
+        while health != "healthy" and time.monotonic() < deadline:
+            time.sleep(2)
+            health = self.container_health(container)
+        _expect(
+            health == "healthy",
+            f"the stack's postgres service becomes healthy (got {health!r})",
+        )
+        return {"engine": "postgresql", "service": "postgres", "health": health}
+
+    def setup_mutation(self, path: str, body: dict, timeout: int = 60) -> Response:
+        return self.client.request(
+            "POST",
+            f"{SETUP_PREFIX}{path}",
+            body=body,
+            headers={"Origin": self.origin, CSRF_HEADER: self.csrf},
+            timeout=timeout,
+        )
+
+    def _json_in(self, service: str, code: str, timeout: int = 60) -> dict:
+        """Run bounded Python inside a service and parse its last JSON line."""
+
+        result = self.compose("exec", "-T", service, "python", "-c", code, timeout=timeout)
+        _expect(
+            result.returncode == 0,
+            f"the {service} helper failed ({result.returncode}): "
+            f"{(result.stderr or '').strip()[:300]}",
+        )
+        lines = [line for line in (result.stdout or "").splitlines() if line.strip()]
+        try:
+            return json.loads(lines[-1]) if lines else {}
+        except json.JSONDecodeError:
+            raise StepFailure(f"the {service} helper printed no JSON") from None
+
+    def step_storage(self) -> dict:
+        database = self._start_database()
+        database_url = self._database_url()
+
+        checked = self.setup_mutation("/storage/check", {"database_url": database_url})
+        _expect(
+            checked.status == 200,
+            f"the storage probe is accepted (got {checked.status}: {checked.text()[:160]})",
+        )
+        probe = checked.json()
+        _expect(probe.get("reachable") is True, "the wizard reaches the database")
+        _expect(
+            probe.get("status") == "empty",
+            f"an unclaimed database is classified empty (got {probe.get('status')!r})",
+        )
+        _expect(probe.get("adoptable") is True, "an empty database is adoptable")
+
+        prepared = self.setup_mutation(
+            "/storage", {"database_url": database_url}, timeout=180
+        )
+        _expect(
+            prepared.status == 200,
+            f"the storage step is accepted (got {prepared.status}: {prepared.text()[:200]})",
+        )
+        payload = prepared.json()
+        _expect(
+            payload.get("state") == "storage_ready",
+            f"the wizard reports storage_ready (got {payload.get('state')!r})",
+        )
+        storage = payload.get("storage") or {}
+        _expect(
+            storage.get("status") == "ours",
+            f"the database is claimed for this installation (got {storage.get('status')!r})",
+        )
+        _expect(
+            storage.get("config_source") == "installation",
+            "the wizard wrote the installation settings file",
+        )
+        _expect(storage.get("migrated") is True, "the wizard applied the migrations")
+        _expect(
+            storage.get("identity_claimed") is True,
+            "the wizard claimed the deployment identity",
+        )
+
+        stat = self.compose(
+            "exec", "-T", "setup", "stat", "-c", "%a %u:%g", INSTALLATION_FILE, timeout=30
+        )
+        file_mode = (stat.stdout or "").strip()
+        _expect(
+            stat.returncode == 0 and file_mode == "600 10001:10001",
+            f"the installation file is 0600 owned by 10001 (got {file_mode!r})",
+        )
+        directory = self.compose(
+            "exec", "-T", "setup", "stat", "-c", "%a %u:%g", INSTALLATION_DIR, timeout=30
+        )
+        directory_mode = (directory.stdout or "").strip()
+        _expect(
+            directory.returncode == 0 and directory_mode == "700 10001:10001",
+            f"the installation directory is 0700 owned by 10001 "
+            f"(got {directory_mode!r})",
+        )
+
+        written = self._json_in(
+            "setup",
+            "import hashlib, json\n"
+            f"payload = json.load(open({INSTALLATION_FILE!r}, encoding='utf-8'))\n"
+            "url = payload.get('database_url') or ''\n"
+            "print(json.dumps({'keys': sorted(payload),"
+            " 'sha256': hashlib.sha256(url.encode('utf-8')).hexdigest()}))\n",
+        )
+        _expect(
+            "database_url" in (written.get("keys") or []),
+            "the installation file names a database",
+        )
+        _expect(
+            written.get("sha256")
+            == hashlib.sha256(database_url.encode("utf-8")).hexdigest(),
+            "the installation file names the database the operator prepared",
+        )
+
+        # No initialize here: the API must start from the file the wizard wrote.
+        started = self.compose(
+            "up",
+            "-d",
+            "--no-build",
+            "--pull",
+            "never",
+            "--no-deps",
+            "backend",
+            timeout=self.args.startup_timeout,
+        )
+        _expect(
+            started.returncode == 0,
+            f"the API did not start ({started.returncode}): "
+            f"{(started.stderr or '').strip()[:300]}",
+        )
+        ready = self.wait_http(
+            "/api/v1/health/ready",
+            lambda response: response.status == 200,
+            timeout=120,
+            description="API readiness through the edge",
+        )
+        checks = (ready.json().get("checks") or {})
+        _expect(
+            checks.get("database") == "ok",
+            f"the API reports its database ready (got {checks.get('database')!r})",
+        )
+        _expect(
+            checks.get("migrations") == "ok",
+            f"the wizard left the schema at the current head "
+            f"(got {checks.get('migrations')!r})",
+        )
+
+        readable = self._json_in(
+            "backend",
+            "import hashlib, json\n"
+            f"payload = json.load(open({INSTALLATION_FILE!r}, encoding='utf-8'))\n"
+            "url = payload.get('database_url') or ''\n"
+            "print(json.dumps({'keys': sorted(payload),"
+            " 'sha256': hashlib.sha256(url.encode('utf-8')).hexdigest()}))\n",
+        )
+        _expect(
+            readable.get("sha256")
+            == hashlib.sha256(database_url.encode("utf-8")).hexdigest(),
+            "the API process reads the settings file the wizard wrote",
+        )
+
+        safe_url = self._json_in(
+            "backend",
+            "import json\n"
+            "from itsm.config import get_settings\n"
+            "print(json.dumps({'database': get_settings().safe_database_url()}))\n",
+        ).get("database")
+        expected = (
+            DEV_DATABASE_URL
+            if self.mode == "dev"
+            else f"postgresql+psycopg://itsm:***@{PROD_DATABASE_HOST}:5432/"
+            f"{PROD_DATABASE_NAME}"
+        )
+        _expect(
+            safe_url == expected,
+            f"the API serves the database the wizard prepared (got {safe_url!r})",
+        )
+
+        counts = self._json_in("backend", HUMAN_COUNT_SCRIPT)
+        _expect(
+            counts.get("humans") == 0,
+            f"the wizard seeds no human user (got {counts.get('humans')!r})",
+        )
+
+        return {
+            "engine": database["engine"],
+            "probe": probe.get("status"),
+            "storage": storage.get("status"),
+            "config_source": storage.get("config_source"),
+            "installation_mode": file_mode,
+            "readiness": checks.get("migrations"),
+            "database": safe_url,
+            "humans": counts.get("humans"),
+        }
+
+    # ------------------------------------------------------------------ owner
+    def step_owner(self) -> dict:
+        password = secrets.token_urlsafe(24)
+        owner_body = {
+            "username": "owner",
+            "display_name": "Installation Owner",
+            "email": "owner@example.invalid",
+            "password": password,
+        }
+
+        created = self.setup_mutation("/owner", owner_body, timeout=180)
+        _expect(
+            created.status == 200,
+            f"the first owner is created (got {created.status}: {created.text()[:200]})",
+        )
+        payload = created.json()
+        _expect(
+            payload.get("state") == "owner_ready",
+            f"the wizard reports owner_ready (got {payload.get('state')!r})",
+        )
+        receipt = payload.get("owner") or {}
+        _expect(
+            receipt.get("username") == "owner",
+            f"the receipt names the new owner (got {receipt.get('username')!r})",
+        )
+        _expect(
+            payload.get("ai") == "transferred",
+            f"the early AI provider is handed over (got {payload.get('ai')!r})",
+        )
+
+        # The backend replays owner_ready idempotently instead of refusing, so
+        # the safety property asserted here is that no second human appears.
+        replay = self.setup_mutation("/owner", owner_body, timeout=180)
+        _expect(
+            replay.status in (200, 409),
+            f"a second owner is refused or replayed (got {replay.status})",
+        )
+        if replay.status == 200:
+            _expect(
+                (replay.json().get("owner") or {}).get("username") == "owner",
+                "a replayed owner request answers with the first owner",
+            )
+
+        counts = self._json_in("backend", HUMAN_COUNT_SCRIPT)
+        _expect(
+            counts.get("humans") == 1,
+            f"exactly one human identity exists (got {counts.get('humans')!r})",
+        )
+        _expect(
+            counts.get("superadmins") == 1,
+            f"the first owner is the only superadmin (got {counts.get('superadmins')!r})",
+        )
+
+        api = Client(f"http://127.0.0.1:{self.api_port}", self.origin)
+        login = api.request(
+            "POST",
+            "/api/v1/auth/login",
+            body={"username": "owner", "password": password},
+            headers={"Origin": self.origin},
+            timeout=30,
+        )
+        _expect(
+            login.status == 200,
+            f"the new owner can log in to the API (got {login.status}: {login.text()[:200]})",
+        )
+        envelope = login.json()
+        user = envelope.get("user") or {}
+        _expect(
+            user.get("username") == "owner",
+            f"the API session names the new owner (got {user.get('username')!r})",
+        )
+        _expect(
+            user.get("roleId") == "superadmin",
+            f"the new owner is superadmin (got {user.get('roleId')!r})",
+        )
+        me = api.request("GET", "/api/v1/auth/me", timeout=30)
+        _expect(
+            me.status == 200,
+            f"the API session is reusable (got {me.status})",
+        )
+
+        listing = api.request("GET", "/api/v1/agent/providers", timeout=30)
+        _expect(
+            listing.status == 200,
+            f"the owner can list providers (got {listing.status}: {listing.text()[:200]})",
+        )
+        items = listing.json().get("items") or []
+        _expect(
+            len(items) == 1,
+            f"the AI step leaves exactly one provider (got {len(items)})",
+        )
+        provider = items[0]
+        _expect(
+            provider.get("baseUrl") == FIXTURE_BASE_URL,
+            f"the transferred provider keeps the configured endpoint "
+            f"(got {provider.get('baseUrl')!r})",
+        )
+        _expect(
+            provider.get("scope") == "personal",
+            f"the transferred provider is personal (got {provider.get('scope')!r})",
+        )
+        _expect(
+            provider.get("name") == "Onboarding provider",
+            f"the transferred provider keeps its name (got {provider.get('name')!r})",
+        )
+
+        # Reload resume: the wizard drops its CSRF value on reload, asks
+        # /session for it again, and a mutation then succeeds.
+        self.csrf = ""
+        reloaded = self.client.request("GET", f"{SETUP_PREFIX}/session", timeout=10)
+        _expect(
+            reloaded.status == 200,
+            f"a reloaded wizard still has its session (got {reloaded.status})",
+        )
+        token = reloaded.json().get("csrf_token")
+        _expect(
+            isinstance(token, str) and len(token) >= 20,
+            "a reloaded wizard gets its CSRF token back",
+        )
+        self.csrf = token or ""
+        resumed = self.setup_mutation(
+            "/storage", {"database_url": self._database_url()}, timeout=60
+        )
+        _expect(
+            resumed.status == 200,
+            f"a mutation with the resumed CSRF token succeeds (got {resumed.status}: "
+            f"{resumed.text()[:160]})",
+        )
+        _expect(
+            resumed.json().get("state") == "owner_ready",
+            "the resumed mutation changes no state",
+        )
+
+        return {
+            "state": payload.get("state"),
+            "owner": receipt.get("username"),
+            "ai": payload.get("ai"),
+            "replay": replay.status,
+            "role": user.get("roleId"),
+            "providers": len(items),
+            "resumed_csrf": resumed.status,
+        }
+
     # ----------------------------------------------------------------- control
+    def _cleanup_profiles(self) -> tuple[str, ...]:
+        """Profiles whose services were started on purpose, so ``down`` sees them."""
+        return ("local-postgres",) if self.mode == "prod" else ()
+
     def _capture_logs(self) -> dict[str, list[str]]:
         print(f"--- bounded logs for project {self.project} ({self.mode}) ---", file=sys.stderr)
         captured: dict[str, list[str]] = {}
-        for service in ("setup", "frontend", FIXTURE_SERVICE):
+        for service in ("setup", "backend", "postgres", "frontend", FIXTURE_SERVICE):
             try:
                 result = self.compose(
                     "logs", "--no-color", "--tail", "40", service, timeout=30
@@ -899,6 +1389,7 @@ class Harness:
             print(
                 "CLEAN docker compose --env-file /dev/null "
                 f"--project-name {self.project} "
+                f"{'--profile local-postgres ' if self.mode == 'prod' else ''}"
                 f"-f compose.yaml -f deploy/compose.{self.mode}.yaml -f {self.override} "
                 "down -v --remove-orphans",
                 file=sys.stderr,
@@ -908,7 +1399,9 @@ class Harness:
             self.cleanup = "removed"
             try:
                 self.compose(
-                    "down", "-v", "--remove-orphans", "--timeout", "20", timeout=120
+                    "down", "-v", "--remove-orphans", "--timeout", "20",
+                    profiles=self._cleanup_profiles(),
+                    timeout=120,
                 )
             except CommandError as exc:
                 print(f"WARN cleanup could not complete: {exc}", file=sys.stderr)
@@ -939,7 +1432,7 @@ class Harness:
         overall = {0: "passed", 1: "failed"}.get(self.exit_code, "blocked")
         report = {
             "harness": "onboarding-e2e",
-            "version": "t7-skeleton",
+            "version": "t7-storage-owner",
             "status": overall,
             "mode": self.mode,
             "project": self.project,
