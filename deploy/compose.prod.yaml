@@ -55,6 +55,14 @@ services:
   worker:
     environment: *prod-environment
 
+  setup:
+    environment:
+      # The claim endpoint compares Origin exactly. TLS terminates at the
+      # proxy, so the container sees an http request and cannot derive the
+      # public https origin from it: give the wizard the same exact origin
+      # the API validates against.
+      ITSM_SETUP_ALLOWED_ORIGINS: ${ITSM_AUTH_ORIGIN:?Set ITSM_AUTH_ORIGIN to the exact production browser origin}
+
   # `python -m itsm.deployment backup-loop`: backup, verify, then retention.
   # RELEASE_MODE=prod is enforced by the command itself, so starting this
   # service in another mode fails instead of writing an artifact elsewhere.
