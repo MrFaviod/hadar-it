@@ -19,6 +19,9 @@ x-demo-environment: &demo-environment
   # demo.db is the name the demo telemetry and reset code expect inside that
   # directory.
   ITSM_DATABASE_URL: sqlite:////data/demo/demo.db
+  # No wizard and no shared installation settings volume here: the demo
+  # database is owned by this overlay and never read from a file.
+  ITSM_INSTALLATION_CONFIG: ""
   ITSM_TASK_STORAGE: sqlite
   ITSM_TASK_SQLITE_PATH: /data/demo/tasks/huey.db
   ITSM_ATTACHMENT_STORAGE_PATH: /data/demo/attachments

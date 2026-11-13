@@ -37,8 +37,9 @@ x-dev-environment: &dev-environment
 x-dev-volumes: &dev-volumes
   # The inherited app/tasks/attachments volumes are replaced on purpose: dev
   # keeps database, attachments and queued work together under /data/dev so a
-  # single reset covers them.
-  volumes: !override [dev-data:/data/dev]
+  # single reset covers them. The installation settings volume stays: dev
+  # writes it through the wizard too, and every reader mounts it read-only.
+  volumes: !override [dev-data:/data/dev, installation-config:/data/installation:ro]
 
 services:
   initialize:
