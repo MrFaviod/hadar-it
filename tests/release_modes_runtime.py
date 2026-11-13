@@ -81,6 +81,9 @@ EXPECTED_SERVICES = {
 }
 
 PROD_DATABASE_URL = "sqlite:////data/app/prod.db"
+INSTALLATION_DIR = "/data/installation"
+INSTALLATION_FILE = "/data/installation/installation.json"
+INSTALLATION_VOLUME = "installation-config"
 PROD_STATUS_TARGET = "/data/backup-status"
 PROD_STATUS_PATH = "/data/backup-status/status.json"
 PROD_BACKUP_TARGET = "/data/backups"
@@ -490,8 +493,19 @@ def _check_render(model: dict, mode: str, project: str, api_port: int, frontend_
         )
         setup_mounts = _mount_targets(setup)
         _expect(
-            set(setup_mounts) == {"/var/lib/itsm-setup"},
-            f"{mode}: setup writes only its private state volume",
+            set(setup_mounts) == {"/var/lib/itsm-setup", INSTALLATION_DIR},
+            f"{mode}: setup writes only its private volumes",
+        )
+        installation_mount = setup_mounts.get(INSTALLATION_DIR)
+        _expect(
+            installation_mount is not None
+            and installation_mount.get("read_only") is not True,
+            f"{mode}: setup is the only writer of the installation settings",
+        )
+        _expect(
+            setup.get("environment", {}).get("ITSM_INSTALLATION_CONFIG")
+            == INSTALLATION_FILE,
+            f"{mode}: setup writes the installation settings file",
         )
         _expect(
             all(mount.get("type") == "volume" for mount in setup_mounts.values())
@@ -503,6 +517,33 @@ def _check_render(model: dict, mode: str, project: str, api_port: int, frontend_
             == "/var/lib/itsm-setup",
             f"{mode}: setup is told where its state volume is",
         )
+        # One shared settings volume, one writer: the API, the worker and the
+        # preparation gate read the operator's storage choice read-only.
+        sources = set()
+        for name in ("initialize", "backend", "worker", "setup"):
+            _expect(name in services, f"{mode}: {name} exists")
+            service = services[name]
+            _expect(
+                service.get("environment", {}).get("ITSM_INSTALLATION_CONFIG")
+                == INSTALLATION_FILE,
+                f"{mode}: {name} reads the installation settings file",
+            )
+            mount = _mount_targets(service).get(INSTALLATION_DIR)
+            _expect(
+                mount is not None and mount.get("type") == "volume",
+                f"{mode}: {name} mounts the installation settings volume",
+            )
+            sources.add(str(_mount_targets(service).get(INSTALLATION_DIR, {}).get("source")))
+        _expect(
+            sources == {INSTALLATION_VOLUME},
+            f"{mode}: the four services share one installation volume",
+        )
+        for name in ("initialize", "backend", "worker"):
+            mount = _mount_targets(services[name]).get(INSTALLATION_DIR)
+            _expect(
+                mount is not None and mount.get("read_only") is True,
+                f"{mode}: {name} never writes the installation settings",
+            )
 
     _expect(
         _published(services["backend"]) == {("127.0.0.1", str(api_port), "8000")},
@@ -537,8 +578,12 @@ def _check_render(model: dict, mode: str, project: str, api_port: int, frontend_
         for name in targets:
             mounts = _mount_targets(services[name])
             _expect(
-                set(mounts) == {"/data/dev"},
-                f"dev: {name} mounts only the mode-owned /data/dev volume",
+                set(mounts) == {"/data/dev", INSTALLATION_DIR},
+                f"dev: {name} mounts the mode-owned /data/dev and settings volumes",
+            )
+            _expect(
+                mounts[INSTALLATION_DIR].get("read_only") is True,
+                f"dev: {name} never writes the installation settings",
             )
         settings = services["backend"]["environment"]
         _expect(
@@ -604,6 +649,10 @@ def _check_render(model: dict, mode: str, project: str, api_port: int, frontend_
             _expect(
                 set(mounts) == {"/data"},
                 f"demo: {name} mounts only the mode-owned /data parent volume",
+            )
+            _expect(
+                services[name]["environment"].get("ITSM_INSTALLATION_CONFIG") == "",
+                f"demo: {name} reads no installation settings file",
             )
         settings = services["backend"]["environment"]
         _expect(
@@ -819,8 +868,11 @@ def _check_setup_edge(base: str, mode: str) -> None:
     """
     allowed = {
         "state", "mode", "release_mode", "setup_enabled", "claim_available",
-        "backend", "version", "instance_id",
+        "backend", "version", "instance_id", "checks",
     }
+    # Mirrors the setup service's own anonymous allowlist: `checks` carries short
+    # status words for the wizard, never a setting or a secret.
+    forbidden = ("password", "secret", "credential", "ciphertext", "api_key", "token", "dsn")
     deadline = time.monotonic() + 30
     last = "no response"
     while time.monotonic() < deadline:
@@ -834,6 +886,23 @@ def _check_setup_edge(base: str, mode: str) -> None:
                 _expect(
                     isinstance(payload, dict) and set(payload) <= allowed,
                     "setup: the anonymous status carries only its allowlist",
+                )
+                raw_checks = payload.get("checks")
+                checks: dict[str, str] = {}
+                for key, value in (raw_checks.items() if isinstance(raw_checks, dict) else ()):
+                    _expect(
+                        isinstance(key, str) and isinstance(value, str),
+                        "setup: the anonymous checks are plain status words",
+                    )
+                    checks[str(key)] = str(value)
+                leaked = [
+                    text
+                    for text in [*checks, *checks.values()]
+                    if any(token in text.lower() for token in forbidden)
+                ]
+                _expect(
+                    not leaked,
+                    f"setup: the anonymous status names no setting or secret {leaked}",
                 )
                 _expect(
                     payload.get("release_mode") == mode,
@@ -883,6 +952,20 @@ def _check_setup_identity(
     _expect(
         stat.returncode == 0 and observed_mode == "700 10001:10001",
         f"{mode}: the setup state volume is 0700 owned by 10001 (got {observed_mode!r})",
+    )
+    installation = _run(
+        _compose_argv(
+            project, mode, override, "exec", "-T", "setup",
+            "stat", "-c", "%a %u:%g", INSTALLATION_DIR,
+        ),
+        env,
+        30,
+    )
+    observed_installation = (installation.stdout or "").strip()
+    _expect(
+        installation.returncode == 0 and observed_installation == "700 10001:10001",
+        f"{mode}: the installation settings volume is 0700 owned by 10001 "
+        f"(got {observed_installation!r})",
     )
 
 

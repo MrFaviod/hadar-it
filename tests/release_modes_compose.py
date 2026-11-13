@@ -6,6 +6,9 @@ import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+INSTALLATION_DIR = "/data/installation"
+INSTALLATION_FILE = "/data/installation/installation.json"
+INSTALLATION_VOLUME = "installation-config"
 
 
 def compose(mode, omit=()):
@@ -78,6 +81,17 @@ def main():
             assert "worker" not in services
             assert services["backend"]["environment"]["OPENAI_API_KEY"] == ""
             assert services["backend"]["environment"]["ITSM_TASK_STORAGE"] == "sqlite"
+            # The demonstration has no wizard and no shared settings volume: the
+            # demo database is owned by its overlay and never read from a file.
+            assert INSTALLATION_VOLUME not in (model.get("volumes") or {}), (
+                "demo must not carry the installation settings volume"
+            )
+            for name in ("initialize", "backend"):
+                assert services[name]["environment"]["ITSM_INSTALLATION_CONFIG"] == "", (
+                    f"demo {name} must not read an installation settings file"
+                )
+                assert [mount["target"] for mount in services[name]["volumes"]] == ["/data"]
+            print("PASS demo: no installation settings volume or file")
         if mode == "prod":
             assert services["initialize"]["image"] == "itsm-ops:0.1.0"
             assert any(v["target"] == "/data/backups" for v in services["initialize"]["volumes"])
@@ -118,6 +132,7 @@ def main():
             assert "/tmp" in str(setup["tmpfs"])
             assert setup["environment"]["RELEASE_MODE"] == mode
             assert setup["environment"]["ITSM_SETUP_STATE_DIR"] == "/var/lib/itsm-setup"
+            assert setup["environment"]["ITSM_INSTALLATION_CONFIG"] == INSTALLATION_FILE
             # The claim endpoint compares Origin exactly and refuses a claim
             # with origin_not_configured when it has no origin: the wizard must
             # carry a non-empty origin, and it must be the one the API pins.
@@ -147,15 +162,64 @@ def main():
             assert {"CHOWN", "FOWNER"} <= set(init["cap_add"])
             assert set(init["cap_add"]) <= {"CHOWN", "FOWNER", "DAC_OVERRIDE"}
             assert init["restart"] == "no"
-            assert [mount["target"] for mount in init["volumes"]] == ["/var/lib/itsm-setup"]
+            assert [mount["target"] for mount in init["volumes"]] == [
+                "/var/lib/itsm-setup",
+                INSTALLATION_DIR,
+            ]
+            assert "chmod 0700" in init["command"][2]
+            assert f"chmod 0700 /var/lib/itsm-setup {INSTALLATION_DIR}" in init["command"][2]
+            assert f"chown 10001:10001 /var/lib/itsm-setup {INSTALLATION_DIR}" in init["command"][2]
             assert any("label=level:s0:c100" in value for value in init["security_opt"])
             if mode == "prod":
                 assert setup["environment"]["ITSM_SETUP_ALLOWED_ORIGINS"] == (
                     "https://test.invalid"
                 ), "production pins the exact https origin the wizard validates"
-            assert [mount["target"] for mount in setup["volumes"]] == ["/var/lib/itsm-setup"]
+            assert [mount["target"] for mount in setup["volumes"]] == [
+                "/var/lib/itsm-setup",
+                INSTALLATION_DIR,
+            ]
             assert all(mount["type"] == "volume" for mount in setup["volumes"])
             assert "docker.sock" not in json.dumps(setup)
+            # One shared settings volume: setup is its only writer, so it is the
+            # only service that mounts it read-write. The API, the worker and the
+            # preparation gate read the same file and must never write it.
+            sources = set()
+            for name in ("initialize", "backend", "worker", "setup"):
+                assert services[name]["environment"]["ITSM_INSTALLATION_CONFIG"] == (
+                    INSTALLATION_FILE
+                ), f"{mode}: {name} must read the installation settings file"
+                mount = next(
+                    (
+                        value
+                        for value in services[name]["volumes"]
+                        if value["target"] == INSTALLATION_DIR
+                    ),
+                    None,
+                )
+                assert mount is not None, f"{mode}: {name} mounts {INSTALLATION_DIR}"
+                assert mount["type"] == "volume", f"{mode}: {name} uses a named volume"
+                sources.add(mount["source"])
+            assert sources == {INSTALLATION_VOLUME}, (
+                f"{mode}: the four services share one installation volume (got {sources})"
+            )
+            assert model["volumes"][INSTALLATION_VOLUME]["name"] == (
+                f"itsm-{mode}_{INSTALLATION_VOLUME}"
+            )
+            for name in ("initialize", "backend", "worker"):
+                mount = next(
+                    value
+                    for value in services[name]["volumes"]
+                    if value["target"] == INSTALLATION_DIR
+                )
+                assert mount.get("read_only") is True, (
+                    f"{mode}: {name} must not write the installation settings"
+                )
+            setup_mount = next(
+                value for value in setup["volumes"] if value["target"] == INSTALLATION_DIR
+            )
+            assert not setup_mount.get("read_only"), (
+                f"{mode}: setup is the only writer of the installation settings"
+            )
             assert any("label=level:s0:c100" in value for value in setup["security_opt"])
         # The UI edge boots alone: a fresh installation has no API to wait for,
         # and the wizard is served through this same edge.
