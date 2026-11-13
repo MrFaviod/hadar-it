@@ -371,12 +371,6 @@ class Harness:
         # the same fixture, so the probe is a real tool-calling round trip.
         env["OPENAI_API_KEY"] = self.provider_key
         env["ITSM_AGENT_OPENAI_BASE_URL"] = FIXTURE_BASE_URL
-        # The setup ping is enqueued by the wizard process and consumed by the
-        # worker; both must point at the same SQLite queue file. The dev overlay
-        # keeps that file on the dev-data volume, production on task-data.
-        env["ITSM_TASK_SQLITE_PATH"] = (
-            "/data/dev/tasks/huey.db" if self.mode == "dev" else "/data/tasks/huey.db"
-        )
         if self.mode == "dev":
             env["ITSM_DEV_ADMIN_PASSWORD"] = secrets.token_urlsafe(18)
         else:
@@ -434,20 +428,10 @@ class Harness:
             "      ITSM_AI_PERSONAL_PRIVATE_ENDPOINTS: ${ITSM_AI_PERSONAL_PRIVATE_ENDPOINTS:-}",
             "      OPENAI_API_KEY: ${OPENAI_API_KEY:-}",
             "      ITSM_AGENT_OPENAI_BASE_URL: ${ITSM_AGENT_OPENAI_BASE_URL:-}",
-            "      ITSM_TASK_SQLITE_PATH: ${ITSM_TASK_SQLITE_PATH:-}",
         ]
-        lines += [
-            "    volumes:",
-            "      - task-data:/data/tasks",
-            "      - attachment-data:/data/attachments",
-        ]
-        if self.mode == "dev":
-            # The wizard needs a writable directory for the dev SQLite target.
-            # A root one-shot owns it exactly like setup-volume-init owns the
-            # wizard state, and the API reads the same volume.
-            lines += [
-                "      - dev-data:/data/dev",
-            ]
+        # The queue and attachment volumes the wizard verifies are part of the
+        # shipped Compose wiring; the override only supplies the disposable AI
+        # fixture and image pins.
         lines += [
             "  setup-volume-init:",
             f"    image: {self.backend_image}",
