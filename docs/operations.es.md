@@ -170,8 +170,9 @@ Responde aunque la API y la base de datos no existan, escucha solo en la red del
 proyecto y se alcanza a través del borde del frontend en `/api/setup/v1/`; nunca se
 publica en un puerto del host. No tiene socket de Docker, montaje del sistema de
 archivos del host ni contenedor privilegiado, así que nunca modifica el despliegue:
-registra el reclamo, la elección de IA, la comprobación de almacenamiento y el primer
-propietario en su propio volumen privado.
+escribe su propio volumen privado, el archivo de ajustes de instalación que el resto
+de servicios lee en solo lectura y, durante la verificación, la cola de tareas del
+worker y el volumen de adjuntos.
 
 El operador habilita el asistente con `enable-claim` dentro de ese contenedor,
 completa los pasos en el navegador y `complete` deja de aceptar mutaciones de

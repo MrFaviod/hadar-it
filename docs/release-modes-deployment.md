@@ -152,8 +152,11 @@ production keeps its data and reports the backup and restore command.
 serves the first-start wizard. It depends only on initializing its private state
 volume, never on the API or database, and it answers while both are absent. It has
 no Docker socket, no host path and no published port: the frontend edge proxies
-`/api/setup/v1/` to it. Its only writable state is the setup volume; it never
-edits this deployment.
+`/api/setup/v1/` to it. It writes its private setup volume, is the only writer of
+the installation settings file (read-only for the API, worker and initializer),
+and during verification it enqueues a real task on the worker queue and writes a
+probe into the attachments volume. It has no Docker socket, no host path and no
+published port, and it never edits this deployment.
 
 The service starts disabled. The operator enables the wizard with
 `python -m itsm.setup.cli enable-claim` inside the container, completes claim, AI,

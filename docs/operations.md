@@ -150,8 +150,9 @@ a separate, unprivileged process that serves the first-start wizard. It answers
 while the API and database are absent, listens only on the project network and is
 reached through the frontend edge at `/api/setup/v1/`; it is never published on a
 host port. It holds no Docker socket, no host filesystem mount and no privileged
-container, so it never changes the deployment: it records the claim, the AI
-choice, the storage check and the first owner in its own private volume.
+container, so it never changes the deployment: it writes its own private volume,
+the installation settings file that every other service reads read-only, and —
+while verifying — the worker's task queue and the attachments volume.
 
 The operator enables the wizard with `enable-claim` inside that container,
 completes the browser steps, and `complete` stops accepting bootstrap mutations.
