@@ -118,6 +118,18 @@ def main():
             assert "/tmp" in str(setup["tmpfs"])
             assert setup["environment"]["RELEASE_MODE"] == mode
             assert setup["environment"]["ITSM_SETUP_STATE_DIR"] == "/var/lib/itsm-setup"
+            # The claim endpoint compares Origin exactly and refuses a claim
+            # with origin_not_configured when it has no origin: the wizard must
+            # carry a non-empty origin, and it must be the one the API pins.
+            backend_origin = services["backend"]["environment"]["ITSM_AUTH_ORIGIN"]
+            explicit = setup["environment"].get("ITSM_SETUP_ALLOWED_ORIGINS", "")
+            claim_origin = (explicit.split(",")[0].strip() if explicit else "") or (
+                setup["environment"].get("ITSM_AUTH_ORIGIN", "").strip()
+            )
+            assert claim_origin, f"{mode}: setup has no claim origin"
+            assert claim_origin == backend_origin, (
+                f"{mode}: setup validates {claim_origin!r}, the API pins {backend_origin!r}"
+            )
             # The wizard never holds root or a capability: the one-shot init
             # container below owns the volume instead.
             assert setup.get("user") == "10001:10001", "the wizard runs unprivileged"

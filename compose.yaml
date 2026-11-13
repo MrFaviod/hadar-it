@@ -202,6 +202,10 @@ services:
     environment:
       RELEASE_MODE: ${RELEASE_MODE:?Set RELEASE_MODE to dev, prod or demo}
       ITSM_SETUP_STATE_DIR: /var/lib/itsm-setup
+      # Same browser origin as the API: the claim endpoint compares Origin
+      # exactly and refuses with origin_not_configured without one. Production
+      # narrows it via ITSM_SETUP_ALLOWED_ORIGINS, which takes precedence.
+      ITSM_AUTH_ORIGIN: "${ITSM_AUTH_ORIGIN:-http://localhost:18080}"
       # Same operator key ring as the API: setup seals a provider credential
       # before a database exists. When unset the AI step reports the missing key
       # instead of silently disabling the provider form.
