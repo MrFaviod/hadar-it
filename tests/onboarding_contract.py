@@ -117,6 +117,31 @@ KNOWN_GAP_TOKENS = {
     "prod_requires_database_url_env": ("ITSM_DATABASE_URL",),
 }
 API_SOURCE = ROOT / "backend" / "itsm" / "setup" / "api.py"
+SETUP_ENTRY_SOURCE = ROOT / "backend" / "itsm" / "setup" / "__main__.py"
+COMPOSE_SOURCES = (
+    ROOT / "compose.yaml",
+    ROOT / "deploy" / "compose.dev.yaml",
+    ROOT / "deploy" / "compose.prod.yaml",
+    ROOT / "deploy" / "compose.demo.yaml",
+)
+
+
+def setup_block(path: Path) -> str:
+    """Return the ``setup:`` service block of a Compose file, matched by indentation."""
+    block: list[str] = []
+    inside = False
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not inside:
+            if re.fullmatch(r"  setup:\s*", line):
+                inside = True
+                block.append(line)
+            continue
+        if re.fullmatch(r"  [A-Za-z0-9_.-]+:\s*", line):
+            break
+        block.append(line)
+    return "\n".join(block)
+
+
 ROUTE_DECORATOR = re.compile(r'@router\.(get|post|put|patch|delete)\("([^"]*)"\)')
 SETUP_PREFIX_PATH = "/api/setup/v1"
 FORBIDDEN_STATUS_TOKENS = (
@@ -791,7 +816,33 @@ def check_runtime_surfaces(report: Report, data: dict, command_ids: set[str]) ->
         isinstance(port, int) and 1024 <= port <= 65535,
         f"got {port!r}",
     )
-    report.equal("setup port is marked as a proposal", compose.get("port_state"), "proposal")
+    report.equal("setup port is implemented and unpublished", compose.get("port_state"), "implemented")
+    report.check(
+        "no host port is published for setup",
+        compose.get("published_host_port") is None,
+        f"got {compose.get('published_host_port')!r}",
+    )
+    entry = SETUP_ENTRY_SOURCE.read_text(encoding="utf-8")
+    host = compose.get("bind_host")
+    report.check(
+        "setup binds the declared host inside the container",
+        f'SETUP_HOST = "{host}"' in entry,
+        f"{SETUP_ENTRY_SOURCE.relative_to(ROOT)} does not bind {host!r}",
+    )
+    report.check(
+        "setup binds the declared port inside the container",
+        isinstance(port, int) and f"SETUP_PORT = {port}" in entry,
+        f"{SETUP_ENTRY_SOURCE.relative_to(ROOT)} does not bind port {port!r}",
+    )
+    for path in COMPOSE_SOURCES:
+        block = setup_block(path)
+        if path.name == "compose.yaml":
+            report.check("compose.yaml declares the setup service", bool(block), "setup block missing")
+        report.check(
+            f"{path.relative_to(ROOT)} publishes no setup host port",
+            not re.search(r"^\s+ports:", block, re.MULTILINE),
+            "a ports: mapping on setup would expose the wizard",
+        )
     report.equal("setup API prefix", compose.get("path_prefix"), "/api/setup/v1")
     report.equal("setup has no Compose dependencies", compose.get("depends_on"), [])
     report.check("demo keeps setup behind a profile", bool(compose.get("demo_profile")), "demo_profile is required")

@@ -728,7 +728,9 @@
   "compose": {
     "setup_service": "setup",
     "port": 8100,
-    "port_state": "proposal",
+    "bind_host": "0.0.0.0",
+    "port_state": "implemented",
+    "published_host_port": null,
     "path_prefix": "/api/setup/v1",
     "depends_on": [],
     "demo_profile": "setup-excluded",

@@ -151,7 +151,7 @@ Postponable in both modes, recorded as pending and never reported as ready: SMTP
 
 ## Compose and edge routing
 
-- New `setup` service, image `itsm-backend:0.1.0` with `command: python -m itsm.setup`, no dependency on `initialize` or `backend`, no published host port, read-only root filesystem, dropped capabilities and SELinux level. It listens on `8100` inside the project network only — a proposal; nothing listens there today.
+- New `setup` service, image `itsm-backend:0.1.0` with `command: python -m itsm.setup`, no dependency on `initialize` or `backend`, no published host port, read-only root filesystem, dropped capabilities and SELinux level. It is implemented: `python -m itsm.setup` binds `0.0.0.0:8100` inside the container, and no Compose file publishes a host port for it, so it is reachable only through the frontend edge (`backend/itsm/setup/__main__.py`, `frontend/nginx.conf:49`).
 - Demo keeps setup out with a dedicated Compose profile, the same technique that keeps `worker` out of the default demo (`deploy/compose.demo.yaml:100-101`).
 - `frontend` loses `depends_on: backend` (`compose.yaml:160-162`). `nginx.conf` gets `resolver 127.0.0.11` and variable `proxy_pass`: `/api/setup/v1/` to `setup:8100`, `/api/` to `backend:8000` with `502`/`503` when the API is absent (`frontend/nginx.conf:37-44`). `deploy/nginx-tls.conf:57-65` drops the static `itsm_api` upstream for the same reason.
 - The exact service set in `tests/release_modes_runtime.py:77-81` changes with the new service; that update belongs to T1, not to this contract slice.
@@ -178,7 +178,7 @@ Recorded limits of this slice. Each one is a behaviour the contract does not pro
 
 1. **Documentation packaging.** The plan allowed a build context that reaches the repository root or a generated artifact. This contract takes the generated artifact: `tools/build-project-context.py` writes `backend/itsm/project_context/pack.json`, which is committed and checked for drift. No Dockerfile or build context changes, so the `itsm-ops` tag chain stays valid.
 2. **Task record.** The plan lists a private task record in this slice's write set. This slice's write scope is limited to the contract documents and the gate, so that record is maintained outside it.
-3. **Setup port.** `8100` is a proposal inside the container, published on loopback as `18010`. Nothing in the repository listens on either port today.
+3. **Setup port.** `8100` is implemented: `python -m itsm.setup` binds `0.0.0.0:8100` inside the container and the edge proxies `/api/setup/v1/` to `setup:8100` (`backend/itsm/setup/__main__.py`, `frontend/nginx.conf:49`, `deploy/nginx-tls.conf:115`). No Compose file publishes a host port for it, so the wizard is unpublished and reachable only through the frontend edge.
 4. **Baseline.** D2 is satisfied by the current master line with the audit fixes already merged, so T0 branches from it instead of waiting.
 5. **Settings seam.** The plan states the precedence rule; the concrete names `resolve_settings_sources` and `ITSM_INSTALLATION_CONFIG`, the `0600`/`0700` modes and the tri-state vocabulary are fixed here.
 6. **AI evidence.** D4 records that no real provider is available. T2 and T8 stay open with "implemented, external verification pending"; a fixture is not a provider observation.
