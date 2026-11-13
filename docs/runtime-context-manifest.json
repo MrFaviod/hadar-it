@@ -1,0 +1,30 @@
+{
+  "schema": "runtime-context-manifest",
+  "schema_version": 1,
+  "notes": "Tracked root product and operator documents only. Local records (odd/, docs/reviews/, AGENTS.md, SYSTEM.md, IDEA.md), environment files, backups and logs are never part of the runtime pack.",
+  "output": "backend/itsm/project_context/pack.json",
+  "documents": [
+    "README.md",
+    "INSTALL.md",
+    "docs/README.md",
+    "docs/features.md",
+    "docs/technical-guide.md",
+    "docs/release-modes-deployment.md",
+    "docs/operations.md",
+    "docs/operations.es.md",
+    "docs/user-operations.md",
+    "docs/user-operations.en.md"
+  ],
+  "components": [
+    {
+      "name": "backend",
+      "source": "backend/pyproject.toml",
+      "format": "pyproject-version"
+    },
+    {
+      "name": "frontend",
+      "source": "frontend/package.json",
+      "format": "package-json-version"
+    }
+  ]
+}
