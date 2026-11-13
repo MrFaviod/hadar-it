@@ -56,6 +56,7 @@ REQUIRED_TOP_LEVEL = (
     "docs_pack",
     "tools",
     "requirements",
+    "known_gaps",
     "recovery",
 )
 REQUIRED_EDGES = {
@@ -100,6 +101,24 @@ POSTPONABLE_REQUIREMENTS = (
     "external_engines",
     "integrations",
 )
+KNOWN_GAP_IDS = (
+    "agent_credentials_env_only",
+    "no_organization_table",
+    "no_backup_policy_writer",
+    "origin_session_validated_not_applied",
+    "prod_requires_database_url_env",
+)
+# Tokens each gap statement must keep: the short form of the meaning it records.
+KNOWN_GAP_TOKENS = {
+    "agent_credentials_env_only": ("environment", "personal"),
+    "no_organization_table": ("organization", "appearance"),
+    "no_backup_policy_writer": ("backup", "risk"),
+    "origin_session_validated_not_applied": ("origin", "session"),
+    "prod_requires_database_url_env": ("ITSM_DATABASE_URL",),
+}
+API_SOURCE = ROOT / "backend" / "itsm" / "setup" / "api.py"
+ROUTE_DECORATOR = re.compile(r'@router\.(get|post|put|patch|delete)\("([^"]*)"\)')
+SETUP_PREFIX_PATH = "/api/setup/v1"
 FORBIDDEN_STATUS_TOKENS = (
     "password",
     "secret",
@@ -111,7 +130,9 @@ FORBIDDEN_STATUS_TOKENS = (
     "token",
     "dsn",
 )
-OPERATION_PATH = re.compile(r"^/api/setup/v1/[a-z0-9_/-]+$")
+OPERATION_PATH = re.compile(
+    r"^/api/setup/v1/(?:[a-z0-9_-]+|\{[a-z_]+\})(?:/(?:[a-z0-9_-]+|\{[a-z_]+\}))*$"
+)
 IDENTIFIER = re.compile(r"^[a-z][a-z0-9_]*$")
 
 
@@ -343,6 +364,96 @@ def check_operations(report: Report, data: dict) -> tuple[list[dict], set[str]]:
             f"no {kind} operation",
         )
     return parsed, identifiers
+
+
+def declared_routes() -> dict[tuple[str, str], str]:
+    """Every ``@router.<method>("<path>")`` the setup app actually serves.
+
+    The contract is the operator-facing promise; this is the shipped surface. The
+    two are compared in both directions so a route added to or dropped from
+    ``backend/itsm/setup/api.py`` cannot leave the document silently wrong.
+    """
+
+    if not API_SOURCE.is_file():
+        return {}
+    source = API_SOURCE.read_text(encoding="utf-8")
+    return {
+        (method.upper(), SETUP_PREFIX_PATH + path): f"@router.{method}(\"{path}\")"
+        for method, path in ROUTE_DECORATOR.findall(source)
+    }
+
+
+def check_operation_routes(report: Report, operations: list[dict]) -> None:
+    """Compare the contract table with the route decorators in ``api.py``.
+
+    The contract is the operator-facing promise; the decorators are the shipped
+    surface. Both directions are checked so neither a documented path that no
+    route serves nor an undocumented setup route can survive the gate.
+    """
+
+    routes = declared_routes()
+    report.check(
+        "backend setup router is readable",
+        bool(routes),
+        f"no @router route found in {API_SOURCE}",
+    )
+    declared: dict[tuple[str, str], str] = {}
+    for operation in operations:
+        identifier = str(operation.get("id"))
+        key = (str(operation.get("method")), str(operation.get("path")))
+        declared[key] = identifier
+        report.check(
+            f"operation {identifier} is served by the backend router",
+            key in routes,
+            f"{key[0]} {key[1]} is not a route in backend/itsm/setup/api.py",
+        )
+    for key, decorator in sorted(routes.items()):
+        report.check(
+            f"backend route {key[0]} {key[1]} is in the contract",
+            key in declared,
+            f"{decorator} has no declared operation",
+        )
+
+
+def check_known_gaps(report: Report, data: dict) -> None:
+    gaps = array(data.get("known_gaps"), "known_gaps", report)
+    report.check("known gaps are recorded", bool(gaps), "known_gaps is empty")
+    seen: set[str] = set()
+    for index, raw in enumerate(gaps):
+        item = obj(raw, f"known_gaps[{index}]", report)
+        identifier = text(item.get("id"), f"known_gaps[{index}].id", report)
+        report.check(
+            f"known gap id is snake_case: {identifier or '?'}",
+            bool(IDENTIFIER.match(identifier)),
+            "id must match ^[a-z][a-z0-9_]*$",
+        )
+        report.check(
+            f"known gap id is unique: {identifier or '?'}",
+            identifier not in seen,
+            "duplicate known gap",
+        )
+        seen.add(identifier)
+        statement = text(item.get("statement"), f"known_gaps[{index}].statement", report)
+        report.check(
+            f"known gap states its meaning: {identifier or '?'}",
+            len(statement) >= 80,
+            "statement is too short to carry the meaning",
+        )
+        tokens = KNOWN_GAP_TOKENS.get(identifier, ())
+        missing = [token for token in tokens if token.lower() not in statement.lower()]
+        report.check(
+            f"known gap keeps its vocabulary: {identifier or '?'}",
+            not missing,
+            f"statement no longer names {missing}",
+        )
+        source = text(item.get("source"), f"known_gaps[{index}].source", report)
+        report.check(
+            f"known gap cites the code that causes it: {identifier or '?'}",
+            source.startswith(("backend/", "deploy/", "frontend/")),
+            f"source {source!r} must name a repository path",
+        )
+    for identifier in KNOWN_GAP_IDS:
+        report.check(f"known gap recorded: {identifier}", identifier in seen, "missing known gap")
 
 
 def check_sanitized_status(report: Report, data: dict, operations: list[dict]) -> list[str]:
@@ -770,7 +881,7 @@ def check_document(report: Report, data: dict, operations: list[dict]) -> None:
             identifier in document,
             "operation is undocumented",
         )
-    for heading in ("## Deviations from plan", "## Baseline"):
+    for heading in ("## Deviations from plan", "## Baseline", "## Known gaps"):
         report.check(f"document has section {heading}", heading in document, "required section missing")
     for token in ("## States and transitions", "## Operations", "## Settings"):
         report.check(f"document has section {token}", token in document, "required section missing")
@@ -795,6 +906,8 @@ def main() -> int:
     check_states(report, data)
     transitions = check_transitions(report, data)
     operations, _ = check_operations(report, data)
+    check_operation_routes(report, operations)
+    check_known_gaps(report, data)
     status_fields = check_sanitized_status(report, data, operations)
     command_ids = check_operator_commands(report, data)
     check_transition_via(report, data, transitions, operations, command_ids)

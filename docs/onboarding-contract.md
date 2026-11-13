@@ -55,6 +55,8 @@ All HTTP paths live under `/api/setup/v1/`. `anonymous` endpoints are read-only 
 | `status` | GET `/api/setup/v1/status` | anonymous | any | yes |
 | `claim` | POST `/api/setup/v1/claim` | claim | `unclaimed` | no |
 | `session` | GET `/api/setup/v1/session` | session | `claimed` … `verifying` | yes |
+| `session_logout` | POST `/api/setup/v1/session/logout` | session | `claimed` … `verifying` | yes |
+| `assistant_ask` | POST `/api/setup/v1/assistant/ask` | session | `claimed` … `configuring` | no |
 | `configure_ai` | POST `/api/setup/v1/ai` | session | `claimed`, `ai_deferred` | yes |
 | `defer_ai` | POST `/api/setup/v1/ai/defer` | session | `claimed` | yes |
 | `check_storage` | POST `/api/setup/v1/storage/check` | session | `ai_configured`, `ai_deferred` | yes |
@@ -63,12 +65,20 @@ All HTTP paths live under `/api/setup/v1/`. `anonymous` endpoints are read-only 
 | `start_configuration` | POST `/api/setup/v1/configuration` | session | `owner_ready` | yes |
 | `verify` | POST `/api/setup/v1/verify` | session | `configuring` | yes |
 | `complete` | POST `/api/setup/v1/complete` | session | `verifying` | yes |
+| `report` | GET `/api/setup/v1/report` | session | `configuring`, `verifying` | yes |
+| `configuration_overview` | GET `/api/setup/v1/configuration` | session | `configuring` … `complete` | yes |
+| `read_section` | GET `/api/setup/v1/configuration/{section}` | session | `configuring` … `complete` | yes |
+| `preview_section` | POST `/api/setup/v1/configuration/{section}` | session | `configuring` | yes |
+| `apply_section` | POST `/api/setup/v1/configuration/{section}/apply` | session | `configuring` | no |
 
 - `status` returns only the sanitized allowlist: `state`, `mode`, `release_mode`, `setup_enabled`, `claim_available`, `backend`, `version`, `instance_id`. It never returns a password, token, credential, ciphertext or database URL.
 - `status` must distinguish an explicit setup, an existing instance and a temporary unavailability. A `502` or `503` from `/api/v1` is never interpreted as a new installation and never offers a claim.
 - `claim` consumes the one-time credential from the local operator channel. The credential is never logged and never placed in a URL. Recovering a lost claim requires a local operator action, not a second registration.
 - `check_storage` probes a candidate database and drives no transition; `apply_storage` owns the transition.
 - The setup session is its own cookie: name `itsm_setup_session`, path `/api/setup/v1`, HttpOnly, SameSite=Strict, Secure following `settings.auth_cookie_secure` (`backend/itsm/config.py:205-212`), TTL 60 minutes, at most 5 attempts. The identity cookie helpers close over `app.state.settings` (`backend/itsm/identity/api.py:373-392`), so the setup app declares its own session instead of importing them unchanged. `Origin` is compared exactly and `X-CSRF-Token` uses a constant-time comparison, mirroring `backend/itsm/identity/api.py:325-345`.
+- `complete` re-runs every required check, writes the completion row and closes the private store; a second call returns the stored report without moving `completed_at`, and the response clears the setup session cookie. `report` exports that report and answers `409 setup_complete` once the installation is complete.
+- Configuration is read through `configuration_overview` and `read_section`, previewed through `preview_section` (no write) and committed through `apply_section`, whose `action` is `apply`, `postpone` or `accept_risk` and which requires `confirm`. Required and postponable items are tracked separately; an accepted risk is stored as a risk and never counted as a pass.
+- `assistant_ask` only asks: it returns advice and applies nothing, so it cannot replace a preview or an apply.
 
 ## Ownership and existing databases
 
@@ -153,6 +163,16 @@ Postponable in both modes, recorded as pending and never reported as ready: SMTP
 ## Recovery
 
 The operator command `recover` reopens configuration from `complete` without resetting the database and without depending on a browser cookie. It preserves installation ownership and the first owner; it is the only transition out of `complete`. The command family is `python -m itsm.setup.cli recover`, `enable-claim` and `rotate-claim`.
+
+## Known gaps
+
+Recorded limits of this slice. Each one is a behaviour the contract does not promise, so a later task closes it deliberately instead of inheriting a false green.
+
+- **Agent credentials are environment-only.** The wizard AI key becomes the first owner's personal `AgentProvider` at hand-off; the agent configuration section stays explicit pending unless the deployment supplies a provider credential in the environment (for example `OPENAI_API_KEY`). The wizard key alone never turns `ai_explicit` green (`backend/itsm/setup/configuration.py:_agent_current`).
+- **No organization table.** Installation branding is written through the appearance section as a built-in or custom preset (`appearance_decided`), never as an organization row (`backend/itsm/appearance/service.py`).
+- **No backup-policy writer.** Production reads an existing policy through `backup_status_path`; an installation without one records `accept_risk` for the `backup_policy_declared` item, stored as a risk and never as success (`backend/itsm/system/service.py:backup_status`).
+- **Origin and session are validated, not applied.** `verify` reports `origin_valid` and `session_valid` from the running settings (a bare `http(s)` origin, and in prod a Secure cookie on a non-loopback host) and refuses to rewrite either value (`backend/itsm/setup/configuration.py:_observe`).
+- **Production requires `ITSM_DATABASE_URL` in the environment.** The installation file is read by every process, but an environment value wins over it, so prod Compose refuses to start without the explicit variable (`backend/itsm/config.py:resolve_settings_sources`, `deploy/compose.prod.yaml`).
 
 ## Deviations from plan
 
