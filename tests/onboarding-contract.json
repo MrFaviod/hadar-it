@@ -865,36 +865,130 @@
     ],
     "source": "backend/itsm/identity/cli.py:111-126"
   },
+  "configuration": {
+    "sections": [
+      "ai",
+      "storage",
+      "owner",
+      "appearance",
+      "operational",
+      "agent"
+    ],
+    "agent": {
+      "provider_record_field": "provider_record",
+      "provider_record_kind": "bool",
+      "provider_record_in": [
+        "read_section.current",
+        "preview_section.current",
+        "apply_section.receipt"
+      ],
+      "environment_wins": true
+    },
+    "operational": {
+      "actions": [
+        "apply",
+        "postpone",
+        "accept_risk",
+        "declare"
+      ],
+      "declaration_action": "declare",
+      "declaration_item": "backup_policy_declared",
+      "declaration_status": "declared",
+      "declaration_never_passed": true,
+      "declaration_fields": [
+        "target",
+        "location_kind",
+        "schedule",
+        "retention",
+        "responsible",
+        "declared_by",
+        "declared_at",
+        "source"
+      ],
+      "location_kinds": [
+        "local",
+        "remote",
+        "object_storage",
+        "managed_service",
+        "other"
+      ],
+      "writable_settings": [
+        "auth_origin",
+        "auth_cookie_secure",
+        "auth_cookie_name",
+        "auth_session_minutes_default"
+      ],
+      "receipt_fields": [
+        "source",
+        "written",
+        "effective",
+        "overridden_by",
+        "restart_required",
+        "restart_scope",
+        "note"
+      ],
+      "precedence": [
+        "env",
+        "installation",
+        "default"
+      ],
+      "restart_required": true,
+      "restart_scope": [
+        "backend",
+        "worker"
+      ],
+      "file_mode": "0600"
+    },
+    "appearance": {
+      "organization_name_field": "organizationName",
+      "min_length": 1,
+      "max_length": 120,
+      "read_path": "/api/v1/appearance/organization",
+      "public_read_path": "/api/v1/appearance/active",
+      "write_section": "appearance"
+    },
+    "migrations": [
+      "0047_agent_provider_link",
+      "0048_appearance_organization",
+      "0049_setup_backup_policy"
+    ]
+  },
   "known_gaps": [
-    {
-      "id": "agent_credentials_env_only",
-      "statement": "Agent credentials are environment-only. The wizard AI key becomes the first owner's personal AgentProvider at hand-off; the agent configuration section stays pending unless the deployment supplies a provider credential in the environment (for example OPENAI_API_KEY), so ai_explicit never turns green from the wizard key alone.",
-      "consequence": "A wizard-only installation keeps ai_explicit required, blocking completion until an operator credential exists.",
-      "source": "backend/itsm/setup/configuration.py:_agent_current; backend/itsm/agents/credentials.py"
-    },
-    {
-      "id": "no_organization_table",
-      "statement": "There is no organization table: installation branding is written through the appearance section as a built-in or custom preset (appearance_decided), never as an organization row.",
-      "consequence": "Any expectation of a persisted organization name or slug has no storage; appearance is the only branding surface.",
-      "source": "backend/itsm/appearance/service.py; backend/itsm/setup/configuration.py:_applier_appearance"
-    },
-    {
-      "id": "no_backup_policy_writer",
-      "statement": "Nothing in the wizard writes a backup policy. Production reads an existing policy through backup_status_path, and an installation that has none must postpone nothing and instead record accept_risk for the backup_policy_declared item, which is stored as risk, never passed.",
-      "consequence": "backup_policy_declared can only be passed by an external policy file or accepted as a recorded risk in prod.",
-      "source": "backend/itsm/setup/configuration.py:accept_risk branch; backend/itsm/system/service.py:backup_status"
-    },
-    {
-      "id": "origin_session_validated_not_applied",
-      "statement": "The origin and session checks are validated, not applied: verify reports origin_valid and session_valid from the running settings (a bare http(s) origin, and in prod a Secure cookie on a non-loopback host) and refuses to rewrite either value.",
-      "consequence": "A wrong ITSM_AUTH_ORIGIN or a loopback prod origin blocks verification until the operator edits the environment.",
-      "source": "backend/itsm/setup/configuration.py:_observe"
-    },
     {
       "id": "prod_requires_database_url_env",
       "statement": "Production requires ITSM_DATABASE_URL in the environment. The installation file the wizard writes is read by every process, but an environment value wins over it, so prod compose refuses to start without the explicit variable.",
       "consequence": "Editing the installation file alone cannot repoint a prod deployment; the environment must carry the URL.",
       "source": "backend/itsm/config.py:resolve_settings_sources; deploy/compose.prod.yaml"
+    }
+  ],
+  "resolved_gaps": [
+    {
+      "id": "agent_credentials_env_only",
+      "statement": "Agent credentials are no longer environment-only: the agent section reports provider_record, the wizard promotes the verified setup key to a global AgentProvider record (migration 0047_agent_provider_link), links it to the installation selection, and the runtime runs on that encrypted record when no provider credential is in the environment.",
+      "limit": "The environment still wins: OPENAI_API_KEY or ANTHROPIC_* shadow the provider record, and a record exists only after the wizard key was verified, so a deferred AI step leaves provider_record false.",
+      "closed_by": "feat/onboarding-gaps ca97222 (migration 0047_agent_provider_link)",
+      "source": "backend/itsm/setup/configuration.py:_agent_current, _promote_setup_provider; backend/itsm/agent_integrations/providers.py"
+    },
+    {
+      "id": "no_organization_table",
+      "statement": "There is still no organizations domain, but the installation name is durable: appearance_state.organization_name carries organizationName, GET /api/v1/appearance/organization reads it back, and the appearance section applies it so a later preset apply, restore or revert keeps the installation identity.",
+      "limit": "No organization table and no slug, membership or tenancy: the name is one appearance field of 1 to 120 characters, and every organization concern beyond branding stays out of appearance.",
+      "closed_by": "feat/onboarding-gaps ca97222 (migration 0048_appearance_organization)",
+      "source": "backend/itsm/appearance/service.py:normalize_organization_name, _active; backend/itsm/appearance/api.py"
+    },
+    {
+      "id": "no_backup_policy_writer",
+      "statement": "The operational section writes a backup declaration: apply_section accepts action declare with target, location_kind, schedule, retention and responsible, stores it in installation_backup_policy (migration 0049_setup_backup_policy) and returns status declared with the row read back, so production can clear backup_policy_declared without accept_risk and never reads it as passed.",
+      "limit": "A declaration is a declaration, not an observation: declared ranks above risk and below a policy that was actually observed, nothing verifies that a backup ran, and an observed or published backup status still decides passed.",
+      "closed_by": "feat/onboarding-gaps ca97222 (migration 0049_setup_backup_policy)",
+      "source": "backend/itsm/setup/configuration.py:_declare_backup_policy; backend/itsm/setup/backup_policy.py"
+    },
+    {
+      "id": "origin_session_validated_not_applied",
+      "statement": "Origin and session settings are now applied, not only validated: the operational section writes auth_origin, auth_cookie_secure, auth_cookie_name and auth_session_minutes_default into the private installation file and reports effective, overridden_by and restart_required with restart_scope backend and worker.",
+      "limit": "The environment still wins over the file, and the values take effect only after a restart: restart_required stays true with restart_scope backend and worker, so writing the file changes nothing in the running processes.",
+      "closed_by": "feat/onboarding-gaps ca97222 (operational apply)",
+      "source": "backend/itsm/setup/configuration.py:_apply_operational; backend/itsm/setup/storage.py:write_installation_values"
     }
   ]
 }

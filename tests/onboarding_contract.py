@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import fnmatch
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -18,6 +19,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 CONTRACT_PATH = ROOT / "tests" / "onboarding-contract.json"
 DOCUMENT_PATH = ROOT / "docs" / "onboarding-contract.md"
+#: The checkout whose ``backend/itsm/setup/api.py`` the route-drift check reads.
+#: Defaults to the sibling ``backend`` of this worktree; point it at another
+#: checkout (a branch worktree, a CI copy) with ``ONBOARDING_BACKEND_DIR``.
+BACKEND_DIR = Path(os.environ.get("ONBOARDING_BACKEND_DIR") or ROOT / "backend").resolve()
 
 STATES = (
     "unclaimed",
@@ -101,23 +106,34 @@ POSTPONABLE_REQUIREMENTS = (
     "external_engines",
     "integrations",
 )
-KNOWN_GAP_IDS = (
+KNOWN_GAP_IDS = ("prod_requires_database_url_env",)
+# Tokens each gap statement must keep: the short form of the meaning it records.
+KNOWN_GAP_TOKENS = {
+    "prod_requires_database_url_env": ("ITSM_DATABASE_URL",),
+}
+# Gaps this slice closes. They stay recorded: a resolved gap keeps the behaviour
+# it fixed and the limit that remains, so a later change cannot quietly re-open it.
+RESOLVED_GAP_IDS = (
     "agent_credentials_env_only",
     "no_organization_table",
     "no_backup_policy_writer",
     "origin_session_validated_not_applied",
-    "prod_requires_database_url_env",
 )
-# Tokens each gap statement must keep: the short form of the meaning it records.
-KNOWN_GAP_TOKENS = {
-    "agent_credentials_env_only": ("environment", "personal"),
-    "no_organization_table": ("organization", "appearance"),
-    "no_backup_policy_writer": ("backup", "risk"),
-    "origin_session_validated_not_applied": ("origin", "session"),
-    "prod_requires_database_url_env": ("ITSM_DATABASE_URL",),
+RESOLVED_GAP_TOKENS = {
+    "agent_credentials_env_only": ("provider_record", "environment"),
+    "no_organization_table": ("organizationName", "appearance"),
+    "no_backup_policy_writer": ("declared", "passed"),
+    "origin_session_validated_not_applied": ("auth_origin", "restart"),
 }
-API_SOURCE = ROOT / "backend" / "itsm" / "setup" / "api.py"
-SETUP_ENTRY_SOURCE = ROOT / "backend" / "itsm" / "setup" / "__main__.py"
+#: The honest limit each resolved gap must still admit, as required substrings.
+RESOLVED_GAP_LIMITS = {
+    "agent_credentials_env_only": ("environment", "wins"),
+    "no_organization_table": ("no organization", "appearance"),
+    "no_backup_policy_writer": ("declaration", "observation"),
+    "origin_session_validated_not_applied": ("restart", "backend"),
+}
+API_SOURCE = BACKEND_DIR / "itsm" / "setup" / "api.py"
+SETUP_ENTRY_SOURCE = BACKEND_DIR / "itsm" / "setup" / "__main__.py"
 COMPOSE_SOURCES = (
     ROOT / "compose.yaml",
     ROOT / "deploy" / "compose.dev.yaml",
@@ -481,6 +497,207 @@ def check_known_gaps(report: Report, data: dict) -> None:
         report.check(f"known gap recorded: {identifier}", identifier in seen, "missing known gap")
 
 
+def check_resolved_gaps(report: Report, data: dict) -> None:
+    """Every closed gap keeps its statement, its code anchor and its honest limit."""
+
+    gaps = array(data.get("resolved_gaps"), "resolved_gaps", report)
+    report.check("resolved gaps are recorded", bool(gaps), "resolved_gaps is empty")
+    seen: set[str] = set()
+    for index, raw in enumerate(gaps):
+        item = obj(raw, f"resolved_gaps[{index}]", report)
+        identifier = text(item.get("id"), f"resolved_gaps[{index}].id", report)
+        report.check(
+            f"resolved gap id is snake_case: {identifier or '?'}",
+            bool(IDENTIFIER.match(identifier)),
+            "id must match ^[a-z][a-z0-9_]*$",
+        )
+        report.check(
+            f"resolved gap id is unique: {identifier or '?'}",
+            identifier not in seen,
+            "duplicate resolved gap",
+        )
+        seen.add(identifier)
+        statement = text(item.get("statement"), f"resolved_gaps[{index}].statement", report)
+        report.check(
+            f"resolved gap states what changed: {identifier or '?'}",
+            len(statement) >= 80,
+            "statement is too short to carry the meaning",
+        )
+        missing = [
+            token for token in RESOLVED_GAP_TOKENS.get(identifier, ()) if token.lower() not in statement.lower()
+        ]
+        report.check(
+            f"resolved gap keeps its vocabulary: {identifier or '?'}",
+            not missing,
+            f"statement no longer names {missing}",
+        )
+        limit = text(item.get("limit"), f"resolved_gaps[{index}].limit", report)
+        missing = [
+            token for token in RESOLVED_GAP_LIMITS.get(identifier, ()) if token.lower() not in limit.lower()
+        ]
+        report.check(
+            f"resolved gap keeps its honest limit: {identifier or '?'}",
+            not missing,
+            f"limit no longer names {missing}",
+        )
+        source = text(item.get("source"), f"resolved_gaps[{index}].source", report)
+        report.check(
+            f"resolved gap cites the code that closed it: {identifier or '?'}",
+            source.startswith(("backend/", "deploy/", "frontend/")),
+            f"source {source!r} must name a repository path",
+        )
+        closed_by = text(item.get("closed_by"), f"resolved_gaps[{index}].closed_by", report)
+        report.check(
+            f"resolved gap names the work that closed it: {identifier or '?'}",
+            bool(closed_by),
+            "closed_by is empty",
+        )
+    for identifier in RESOLVED_GAP_IDS:
+        report.check(f"resolved gap recorded: {identifier}", identifier in seen, "missing resolved gap")
+    overlap = seen & set(KNOWN_GAP_IDS)
+    report.check("no gap is both open and resolved", not overlap, f"also in known_gaps: {sorted(overlap)}")
+
+
+def check_configuration(report: Report, data: dict) -> None:
+    """The configuration sections the gaps closed, pinned to the shipped surface."""
+
+    block = obj(data.get("configuration"), "configuration", report)
+    report.equal(
+        "configuration names the sections the wizard answers",
+        block.get("sections"),
+        ["ai", "storage", "owner", "appearance", "operational", "agent"],
+    )
+
+    agent = obj(block.get("agent"), "configuration.agent", report)
+    report.equal(
+        "agent section names the provider-record field",
+        agent.get("provider_record_field"),
+        "provider_record",
+    )
+    report.equal("provider record is a boolean signal", agent.get("provider_record_kind"), "bool")
+    report.equal(
+        "provider record is reported on read, preview and apply",
+        sorted(agent.get("provider_record_in") or []),
+        ["apply_section.receipt", "preview_section.current", "read_section.current"],
+    )
+    report.check(
+        "agent provider record never outranks the environment",
+        agent.get("environment_wins") is True,
+        "the record must not claim precedence over an environment credential",
+    )
+
+    operational = obj(block.get("operational"), "configuration.operational", report)
+    report.equal(
+        "operational apply accepts declare beside the risk actions",
+        operational.get("actions"),
+        ["apply", "postpone", "accept_risk", "declare"],
+    )
+    report.equal(
+        "operational declaration is the declare action",
+        operational.get("declaration_action"),
+        "declare",
+    )
+    report.equal(
+        "operational declaration targets the backup item",
+        operational.get("declaration_item"),
+        "backup_policy_declared",
+    )
+    report.equal(
+        "a declaration reports its own status",
+        operational.get("declaration_status"),
+        "declared",
+    )
+    report.check(
+        "a declaration is never reported as passed",
+        operational.get("declaration_never_passed") is True,
+        "declared must stay distinct from passed",
+    )
+    report.equal(
+        "declaration carries the declared row fields",
+        operational.get("declaration_fields"),
+        ["target", "location_kind", "schedule", "retention", "responsible", "declared_by", "declared_at", "source"],
+    )
+    report.equal(
+        "declaration accepts the stored location kinds",
+        operational.get("location_kinds"),
+        ["local", "remote", "object_storage", "managed_service", "other"],
+    )
+    report.equal(
+        "operational apply writes the origin and session settings",
+        operational.get("writable_settings"),
+        ["auth_origin", "auth_cookie_secure", "auth_cookie_name", "auth_session_minutes_default"],
+    )
+    report.equal(
+        "operational receipt reports provenance and restart",
+        operational.get("receipt_fields"),
+        ["source", "written", "effective", "overridden_by", "restart_required", "restart_scope", "note"],
+    )
+    report.equal(
+        "installation file sits under the environment",
+        operational.get("precedence"),
+        ["env", "installation", "default"],
+    )
+    report.check(
+        "origin and session writes require a restart",
+        operational.get("restart_required") is True
+        and operational.get("restart_scope") == ["backend", "worker"],
+        "restart_required must hold for backend and worker",
+    )
+    report.equal("installation file is private", operational.get("file_mode"), "0600")
+
+    appearance = obj(block.get("appearance"), "configuration.appearance", report)
+    report.equal(
+        "appearance section carries the organization name",
+        appearance.get("organization_name_field"),
+        "organizationName",
+    )
+    report.equal("organization name has a lower bound", appearance.get("min_length"), 1)
+    report.equal("organization name has an upper bound", appearance.get("max_length"), 120)
+    report.equal(
+        "organization name is read back over the app API",
+        appearance.get("read_path"),
+        "/api/v1/appearance/organization",
+    )
+    report.equal(
+        "public appearance read path is unchanged",
+        appearance.get("public_read_path"),
+        "/api/v1/appearance/active",
+    )
+    report.equal(
+        "organization name is written by the appearance section",
+        appearance.get("write_section"),
+        "appearance",
+    )
+    api_path = BACKEND_DIR / "itsm" / "appearance" / "api.py"
+    service_path = BACKEND_DIR / "itsm" / "appearance" / "service.py"
+    if api_path.is_file():
+        report.check(
+            "appearance API serves the organization read",
+            '@router.get("/appearance/organization")' in api_path.read_text(encoding="utf-8"),
+            f"{api_path} does not serve /appearance/organization",
+        )
+    if service_path.is_file():
+        report.check(
+            "appearance service caps the name at the declared length",
+            "ORGANIZATION_MAX_NAME = 120" in service_path.read_text(encoding="utf-8"),
+            f"{service_path} no longer caps the organization name at 120",
+        )
+
+    migrations = array(block.get("migrations"), "configuration.migrations", report)
+    report.equal(
+        "configuration names the migrations the gaps added",
+        migrations,
+        ["0047_agent_provider_link", "0048_appearance_organization", "0049_setup_backup_policy"],
+    )
+    for name in migrations:
+        path = BACKEND_DIR / "migrations" / "versions" / f"{name}.py"
+        report.check(
+            f"migration {name} exists in the backend checkout",
+            path.is_file(),
+            f"missing {path}",
+        )
+
+
 def check_sanitized_status(report: Report, data: dict, operations: list[dict]) -> list[str]:
     block = obj(data.get("sanitized_status"), "sanitized_status", report)
     fields = array(block.get("fields"), "sanitized_status.fields", report)
@@ -827,12 +1044,12 @@ def check_runtime_surfaces(report: Report, data: dict, command_ids: set[str]) ->
     report.check(
         "setup binds the declared host inside the container",
         f'SETUP_HOST = "{host}"' in entry,
-        f"{SETUP_ENTRY_SOURCE.relative_to(ROOT)} does not bind {host!r}",
+        f"{SETUP_ENTRY_SOURCE} does not bind {host!r}",
     )
     report.check(
         "setup binds the declared port inside the container",
         isinstance(port, int) and f"SETUP_PORT = {port}" in entry,
-        f"{SETUP_ENTRY_SOURCE.relative_to(ROOT)} does not bind port {port!r}",
+        f"{SETUP_ENTRY_SOURCE} does not bind port {port!r}",
     )
     for path in COMPOSE_SOURCES:
         block = setup_block(path)
@@ -959,6 +1176,8 @@ def main() -> int:
     operations, _ = check_operations(report, data)
     check_operation_routes(report, operations)
     check_known_gaps(report, data)
+    check_resolved_gaps(report, data)
+    check_configuration(report, data)
     status_fields = check_sanitized_status(report, data, operations)
     command_ids = check_operator_commands(report, data)
     check_transition_via(report, data, transitions, operations, command_ids)
