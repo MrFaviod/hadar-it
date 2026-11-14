@@ -2,7 +2,7 @@
 
 Binding contract for the first-start wizard of a new Hadar IT installation (dev and prod). It records the decisions already taken for this branch and the existing repository facts that constrain them. It does not claim that the wizard exists yet: T1 onwards implement this contract, and `tests/onboarding_contract.py` is the structural gate for both.
 
-Run the gate with `python3 tests/onboarding_contract.py`. It reads `tests/onboarding-contract.json` and this document; it starts nothing, opens no database and reads no secret.
+Run the gate with `python3 tests/onboarding_contract.py`. It reads `tests/onboarding-contract.json` and this document; it starts nothing, opens no database and reads no secret. The backend anchors resolve to `<worktree>/backend`; set `ONBOARDING_BACKEND_DIR` to point them at another checkout (a branch worktree, a CI copy) without changing the default.
 
 ## Scope and invariants
 
@@ -77,8 +77,23 @@ All HTTP paths live under `/api/setup/v1/`. `anonymous` endpoints are read-only 
 - `check_storage` probes a candidate database and drives no transition; `apply_storage` owns the transition.
 - The setup session is its own cookie: name `itsm_setup_session`, path `/api/setup/v1`, HttpOnly, SameSite=Strict, Secure following `settings.auth_cookie_secure` (`backend/itsm/config.py:205-212`), TTL 60 minutes, at most 5 attempts. The identity cookie helpers close over `app.state.settings` (`backend/itsm/identity/api.py:373-392`), so the setup app declares its own session instead of importing them unchanged. `Origin` is compared exactly and `X-CSRF-Token` uses a constant-time comparison, mirroring `backend/itsm/identity/api.py:325-345`.
 - `complete` re-runs every required check, writes the completion row and closes the private store; a second call returns the stored report without moving `completed_at`, and the response clears the setup session cookie. `report` exports that report and answers `409 setup_complete` once the installation is complete.
-- Configuration is read through `configuration_overview` and `read_section`, previewed through `preview_section` (no write) and committed through `apply_section`, whose `action` is `apply`, `postpone` or `accept_risk` and which requires `confirm`. Required and postponable items are tracked separately; an accepted risk is stored as a risk and never counted as a pass.
+- Configuration is read through `configuration_overview` and `read_section`, previewed through `preview_section` (no write) and committed through `apply_section`, whose `action` is `apply`, `postpone`, `accept_risk` or `declare` and which requires `confirm`. Required and postponable items are tracked separately; an accepted risk is stored as a risk and never counted as a pass, and a `declare` is stored as a declaration, never as a pass either.
 - `assistant_ask` only asks: it returns advice and applies nothing, so it cannot replace a preview or an apply.
+
+## Configuration sections
+
+`configuration_overview` and `read_section` answer one section at a time, `preview_section` writes nothing, and `apply_section` requires `confirm`. Three sections carry the behaviour this slice added:
+
+| Section | Reports | Applies |
+|---|---|---|
+| `agent` | `provider_record` (bool: the persisted selection is linked to a global `AgentProvider` row) beside provider, model, credential, capability and tool | promotes the verified setup key to a global provider record (reused on re-apply) and links it; the receipt adds `provider_record`. No request field changes and the key never appears in a response. |
+| `appearance` | `organizationName` from the persisted appearance state | `values.organizationName`, normalized to 1..120 characters and read back before the section turns `passed`. |
+| `operational` | `origin`, `cookie_secure`, `worker`, per-key `settings` provenance, `restart_required`, `restart_scope` and `backup_policy` | `action: "declare"` with the backup policy fields, or the settings `auth_origin`, `auth_cookie_secure`, `auth_cookie_name` and `auth_session_minutes_default`. |
+
+- `declare` is a fourth `action` beside `apply`, `postpone` and `accept_risk`, and it only accepts the backup policy: `target`, `location_kind`, `schedule`, `retention` and `responsible` land in `installation_backup_policy` (migration `0049_setup_backup_policy`) with `source: "declaration"` and `status: "declared"`. `declared` outranks `risk` and never becomes `passed`: an observed or published backup status still decides `passed` and wins over the declaration. Validation rejects empty fields, a `location_kind` outside `local|remote|object_storage|managed_service|other`, a `retention` without a digit, control characters and an unconfirmed apply.
+- The operational settings are written into the private installation file through the same atomic writer (`0600` file, `0700` directory, symlink refused, existing keys preserved) and validated by the settings resolver before publication. The receipt reports `source: "installation_file"`, `written`, `effective` per key with its source, `overridden_by` (the environment variable names that shadowed a value), `restart_required: true` and `restart_scope: ["backend", "worker"]`. A file value applies only after a restart, and only while the matching `ITSM_*` variable stays unset.
+- `provider_record` is `true` only when the selection is linked to a global row; the runtime runs on that encrypted row when the environment carries no `OPENAI_API_KEY`/`ANTHROPIC_*`, and an environment credential still wins. Migrations: `0047_agent_provider_link`, `0048_appearance_organization`, `0049_setup_backup_policy`.
+- `GET /api/v1/appearance/organization` returns only `{"organizationName": ...}` to an authenticated caller, while the public `GET /api/v1/appearance/active` keeps its envelope and now carries the persisted name in `branding.organizationName`. The write path stays inside the wizard (`POST /api/setup/v1/configuration/appearance/apply`); `preset` remains optional and a combined apply reports `apply_preset+set_organization`.
 
 ## Ownership and existing databases
 
@@ -166,13 +181,18 @@ The operator command `recover` reopens configuration from `complete` without res
 
 ## Known gaps
 
-Recorded limits of this slice. Each one is a behaviour the contract does not promise, so a later task closes it deliberately instead of inheriting a false green.
+Recorded limits that stay open. Each one is a behaviour the contract does not promise, so a later task closes it deliberately instead of inheriting a false green.
 
-- **Agent credentials are environment-only.** The wizard AI key becomes the first owner's personal `AgentProvider` at hand-off; the agent configuration section stays explicit pending unless the deployment supplies a provider credential in the environment (for example `OPENAI_API_KEY`). The wizard key alone never turns `ai_explicit` green (`backend/itsm/setup/configuration.py:_agent_current`).
-- **No organization table.** Installation branding is written through the appearance section as a built-in or custom preset (`appearance_decided`), never as an organization row (`backend/itsm/appearance/service.py`).
-- **No backup-policy writer.** Production reads an existing policy through `backup_status_path`; an installation without one records `accept_risk` for the `backup_policy_declared` item, stored as a risk and never as success (`backend/itsm/system/service.py:backup_status`).
-- **Origin and session are validated, not applied.** `verify` reports `origin_valid` and `session_valid` from the running settings (a bare `http(s)` origin, and in prod a Secure cookie on a non-loopback host) and refuses to rewrite either value (`backend/itsm/setup/configuration.py:_observe`).
 - **Production requires `ITSM_DATABASE_URL` in the environment.** The installation file is read by every process, but an environment value wins over it, so prod Compose refuses to start without the explicit variable (`backend/itsm/config.py:resolve_settings_sources`, `deploy/compose.prod.yaml`).
+
+## Resolved gaps
+
+Four limits this contract used to record are closed in the backend (`feat/onboarding-gaps`, `ca97222`) and the frontend (`feat/onboarding`). They stay listed with the limit that remains, so the closure is visible and a regression re-opens a recorded gap instead of passing silently.
+
+- **Agent credentials are no longer environment-only.** The agent section reports `provider_record`: the wizard promotes the verified setup key to a global `AgentProvider` record, links it to the installation selection and reuses it on re-apply, and the runtime runs on that encrypted record when no provider credential is in the environment (`backend/itsm/setup/configuration.py:_agent_current`, `_promote_setup_provider`; migration `0047_agent_provider_link`). Limit: the environment still wins — `OPENAI_API_KEY` or `ANTHROPIC_*` shadow the record, and a deferred AI step leaves `provider_record` false.
+- **The organization name is durable, still without an organization table.** `appearance_state.organization_name` carries `organizationName` (migration `0048_appearance_organization`); the appearance section applies it as `values.organizationName` with 1..120 characters and a restricted character set, the name is overlaid on every preset so apply, restore and revert keep it, and `GET /api/v1/appearance/organization` reads it back to an authenticated caller (`backend/itsm/appearance/service.py:normalize_organization_name`, `_active`). Limit: no organization table, slug, membership or tenancy — appearance keeps nothing but branding.
+- **The operational section writes a backup declaration.** `apply_section` accepts `action: "declare"` with `target`, `location_kind`, `schedule`, `retention` and `responsible`, stores the row in `installation_backup_policy` (migration `0049_setup_backup_policy`) and returns `status: "declared"` with the row read back, so production clears `backup_policy_declared` without `accept_risk` (`backend/itsm/setup/configuration.py:_declare_backup_policy`). Limit: a declaration is a declaration, not an observation — nothing verifies that a backup ran, and an observed or published backup status still decides `passed` and wins.
+- **Origin and session settings are applied, and a restart is required.** The operational section writes `auth_origin`, `auth_cookie_secure`, `auth_cookie_name` and `auth_session_minutes_default` into the private installation file and reports `source: "installation_file"`, `written`, `effective` with per-key provenance, `overridden_by`, `restart_required: true` and `restart_scope: ["backend", "worker"]` (`backend/itsm/setup/configuration.py:_apply_operational`, `backend/itsm/setup/storage.py:write_installation_values`). Limit: the environment still wins over the file, and the values take effect only after a restart of the backend and the worker.
 
 ## Deviations from plan
 
