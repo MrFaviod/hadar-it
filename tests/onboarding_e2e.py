@@ -1692,9 +1692,29 @@ class Harness:
             "the write leaves the harness origin untouched",
         )
 
-        # accept_risk is a production-only decision and development is satisfied
-        # by the item not being required, so dev offers and probes no risk path.
-        risk_probe = "not_required" if self.mode == "dev" else None
+        # accept_risk is a production-only decision. Development is satisfied by
+        # the item not being required, and the service refuses the risk with a
+        # typed 422 instead of a generic failure.
+        if self.mode == "dev":
+            refused = self.setup_mutation(
+                "/configuration/operational/apply",
+                {
+                    "values": {"item": "backup_policy_declared", "reason": "e2e_probe"},
+                    "action": "accept_risk",
+                    "confirm": True,
+                },
+            )
+            _expect(
+                refused.status == 422,
+                f"dev refuses a backup risk with 422 (got {refused.status}: {refused.text()[:200]})",
+            )
+            _expect(
+                refused.json().get("error") == "configuration_invalid",
+                f"dev names the risk refusal configuration_invalid (got {refused.text()[:200]})",
+            )
+            risk_probe = "refused_configuration_invalid"
+        else:
+            risk_probe = None
 
         return {
             "state": started.json().get("state"),
