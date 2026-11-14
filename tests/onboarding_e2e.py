@@ -118,6 +118,22 @@ FIXTURE_PORT = 8080
 FIXTURE_MODEL = "probe-model"
 FIXTURE_BASE_URL = f"http://{FIXTURE_SERVICE}:{FIXTURE_PORT}/v1"
 
+# The installation identity the wizard is given, asserted through the setup
+# read-back, the public appearance shell and the authenticated org endpoint.
+ORGANIZATION_NAME = "E2E Installation"
+# A stated -- not observed -- production backup policy. Declaring it satisfies
+# verify without pretending the backup itself was ever exercised.
+BACKUP_DECLARATION = {
+    "item": "backup_policy_declared",
+    "target": "s3://e2e-backups/prod",
+    "location_kind": "object_storage",
+    "schedule": "daily 02:00 UTC",
+    "retention": "30 days",
+    "responsible": "platform team",
+}
+# Inside the settings contract (5..1440) and short enough to stay disposable.
+SESSION_MINUTES_DEFAULT = 30
+
 STEP_ORDER = (
     "boot",
     "claim",
@@ -320,6 +336,7 @@ class Harness:
         self.blocked_steps: list[str] = []
         self.blocked_sources: dict[str, str] = {}
         self.snapshot_archive: Path | None = None
+        self.owner_password = ""
         self.exit_code = 1
         self.steps: list[dict] = []
         self.leftovers: dict[str, list[str]] = {}
@@ -1297,6 +1314,7 @@ class Harness:
     # ------------------------------------------------------------------ owner
     def step_owner(self) -> dict:
         password = secrets.token_urlsafe(24)
+        self.owner_password = password
         owner_body = {
             "username": "owner",
             "display_name": "Installation Owner",
@@ -1497,7 +1515,8 @@ class Harness:
         _expect(target is not None, f"a different appearance preset exists (current {preset_before!r})")
 
         preview = self.setup_mutation(
-            "/configuration/appearance", {"values": {"preset": target}}
+            "/configuration/appearance",
+            {"values": {"preset": target, "organizationName": ORGANIZATION_NAME}},
         )
         _expect(
             preview.status == 200,
@@ -1518,13 +1537,26 @@ class Harness:
             f"the preview lists the preset change to {target!r}",
         )
         _expect(
+            any(
+                change.get("field") == "organizationName"
+                and change.get("to") == ORGANIZATION_NAME
+                for change in changes
+                if isinstance(change, dict)
+            ),
+            f"the preview lists the organization name {ORGANIZATION_NAME!r}",
+        )
+        _expect(
             (self._section("appearance").get("current") or {}).get("preset") == preset_before,
             "the preview wrote nothing",
         )
 
         applied = self.setup_mutation(
             "/configuration/appearance/apply",
-            {"values": {"preset": target}, "action": "apply", "confirm": True},
+            {
+                "values": {"preset": target, "organizationName": ORGANIZATION_NAME},
+                "action": "apply",
+                "confirm": True,
+            },
         )
         _expect(
             applied.status == 200,
@@ -1539,6 +1571,15 @@ class Harness:
         _expect(
             (readback.get("current") or {}).get("preset") == target,
             f"the applied appearance reads back as {target!r}",
+        )
+        _expect(
+            (readback.get("current") or {}).get("organizationName") == ORGANIZATION_NAME,
+            f"the organization name reads back as {ORGANIZATION_NAME!r}",
+        )
+        _expect(
+            (applied.json().get("receipt") or {}).get("source")
+            == "apply_preset+set_organization",
+            "the appearance receipt names both writes",
         )
 
         postponed = self.setup_mutation(
@@ -1567,12 +1608,105 @@ class Harness:
             "a postponed section is never reported green",
         )
 
+        # An operational setting the wizard owns in the private installation
+        # file. The harness origin already comes from the environment, so the
+        # write must never move it; the session lifetime is the safe value.
+        operational_before = self._section("operational")
+        origin_before = str((operational_before.get("current") or {}).get("origin") or "")
+        _expect(bool(origin_before), "the operational section reports the origin")
+
+        preview = self.setup_mutation(
+            "/configuration/operational",
+            {"values": {"auth_session_minutes_default": SESSION_MINUTES_DEFAULT}},
+        )
+        _expect(
+            preview.status == 200,
+            f"the session setting previews (got {preview.status}: {preview.text()[:200]})",
+        )
+        preview_body = preview.json()
+        _expect(
+            preview_body.get("status") == "preview" and preview_body.get("preview_only") is True,
+            "the operational preview reports itself as a preview",
+        )
+        _expect(
+            (preview_body.get("proposed") or {}).get("auth_session_minutes_default")
+            == SESSION_MINUTES_DEFAULT,
+            "the operational preview proposes the session value",
+        )
+
+        applied = self.setup_mutation(
+            "/configuration/operational/apply",
+            {
+                "values": {"auth_session_minutes_default": SESSION_MINUTES_DEFAULT},
+                "action": "apply",
+                "confirm": True,
+            },
+        )
+        _expect(
+            applied.status == 200,
+            f"the session setting applies (got {applied.status}: {applied.text()[:200]})",
+        )
+        settings_body = applied.json()
+        _expect(
+            settings_body.get("status") == "applied",
+            f"the settings apply reports applied (got {settings_body.get('status')!r})",
+        )
+        settings_receipt = settings_body.get("receipt") or {}
+        _expect(
+            settings_receipt.get("restart_required") is True,
+            "the settings receipt says a restart is required",
+        )
+        _expect(
+            "auth_session_minutes_default" in (settings_receipt.get("written") or []),
+            "the receipt names the written key",
+        )
+        _expect(
+            "ITSM_AUTH_SESSION_MINUTES_DEFAULT" not in (settings_receipt.get("overridden_by") or []),
+            "no environment variable overrides the written session setting",
+        )
+        effective = (settings_receipt.get("effective") or {}).get("auth_session_minutes_default") or {}
+        _expect(
+            effective.get("value") == SESSION_MINUTES_DEFAULT,
+            f"the effective session value reads back (got {effective!r})",
+        )
+        _expect(
+            effective.get("source") == "installation",
+            f"the effective value comes from the installation file (got {effective.get('source')!r})",
+        )
+
+        operational_after = self._section("operational")
+        after_current = operational_after.get("current") or {}
+        _expect(
+            after_current.get("restart_required") is True,
+            "the operational read-back reports the pending restart",
+        )
+        _expect(
+            ((after_current.get("settings") or {}).get("auth_session_minutes_default") or {}).get(
+                "value"
+            )
+            == SESSION_MINUTES_DEFAULT,
+            "the operational read-back carries the session value",
+        )
+        _expect(
+            str(after_current.get("origin") or "") == origin_before,
+            "the write leaves the harness origin untouched",
+        )
+
+        # accept_risk is a production-only decision and development is satisfied
+        # by the item not being required, so dev offers and probes no risk path.
+        risk_probe = "not_required" if self.mode == "dev" else None
+
         return {
             "state": started.json().get("state"),
             "preset_before": preset_before,
             "preset_after": (readback.get("current") or {}).get("preset"),
+            "organization": (readback.get("current") or {}).get("organizationName"),
             "changed_fields": [change.get("field") for change in changes if isinstance(change, dict)],
             "notifications": notification.get("status"),
+            "session_minutes": effective.get("value"),
+            "restart_required": settings_receipt.get("restart_required"),
+            "origin_unchanged": str(after_current.get("origin") or "") == origin_before,
+            "accept_risk": risk_probe,
         }
 
     # -------------------------------------------------------------- verify
@@ -1613,6 +1747,7 @@ class Harness:
             "capability": receipt.get("capability"),
             "tool": receipt.get("tool"),
             "reason": receipt.get("reason"),
+            "provider_record": receipt.get("provider_record"),
         }
 
     def step_verify(self) -> dict:
@@ -1625,6 +1760,17 @@ class Harness:
         _expect(
             agent.get("status") == "passed",
             f"the agent section is green after the observed probe (got {agent.get('status')!r})",
+        )
+        # The stack carries OPENAI_API_KEY so the runtime probe has a credential;
+        # promotion is keyed on the provider the setup step itself verified, not
+        # on that ambient key, so the record must still be linked.
+        _expect(
+            agent.get("provider_record") is True,
+            f"the apply links the verified setup provider as a record (got {agent.get('provider_record')!r})",
+        )
+        _expect(
+            (self._section("agent").get("current") or {}).get("provider_record") is True,
+            "the agent section reads the linked provider record back",
         )
 
         response = self.setup_mutation("/verify", {}, timeout=180)
@@ -1648,41 +1794,70 @@ class Harness:
                 backup.get("status") != "passed",
                 "an undeclared production backup is not green before it is decided",
             )
-            risk = self.setup_mutation(
+            declared = self.setup_mutation(
                 "/configuration/operational/apply",
                 {
-                    "values": {
-                        "item": "backup_policy_declared",
-                        "reason": "e2e accepts the backup risk",
-                    },
-                    "action": "accept_risk",
+                    "values": dict(BACKUP_DECLARATION),
+                    "action": "declare",
                     "confirm": True,
                 },
             )
             _expect(
-                risk.status == 200,
-                f"the backup risk is accepted (got {risk.status}: {risk.text()[:200]})",
+                declared.status == 200,
+                f"the backup policy is declared (got {declared.status}: {declared.text()[:200]})",
+            )
+            declared_body = declared.json()
+            _expect(
+                declared_body.get("status") == "declared",
+                f"the declaration reports declared (got {declared_body.get('status')!r})",
+            )
+            policy = (declared_body.get("receipt") or {}).get("backup_policy") or {}
+            _expect(
+                all(
+                    policy.get(key) == BACKUP_DECLARATION[key]
+                    for key in ("target", "location_kind", "schedule", "retention", "responsible")
+                ),
+                f"the declaration reads back the stated policy (got {policy!r})",
             )
             _expect(
-                risk.json().get("status") == "risk",
-                f"the accepted backup is reported as a risk (got {risk.json().get('status')!r})",
+                policy.get("source") == "declaration" and policy.get("declared_by") == "owner",
+                f"the declaration names its source and the owner (got {policy!r})",
+            )
+            section = self._section("operational")
+            _expect(
+                section.get("status") == "declared",
+                f"the operational section reads back declared (got {section.get('status')!r})",
             )
             _expect(
-                (self._section("operational").get("status")) == "risk",
-                "the accepted risk reads back as a risk",
+                ((section.get("current") or {}).get("backup_policy") or {}).get("target")
+                == BACKUP_DECLARATION["target"],
+                "the operational read-back carries the declared policy",
             )
             response = self.setup_mutation("/verify", {}, timeout=180)
+            _expect(
+                response.status == 200,
+                f"verification passes after the declaration (got {response.status}: "
+                f"{response.text()[:200]})",
+            )
             body = _safe_json(response) or {}
             items = self._checklist_by_id(body)
             blocking = [str(name) for name in body.get("blocking") or []]
             backup = items.get("backup_policy_declared") or {}
             _expect(
-                backup.get("status") == "risk" and backup.get("acceptedRisk") is True,
-                f"the checklist keeps the backup as an accepted risk (got {backup!r})",
+                backup.get("status") == "declared",
+                f"the checklist reports the backup as declared (got {backup.get('status')!r})",
             )
             _expect(
-                backup.get("blocking") is False,
-                "the accepted backup risk no longer blocks",
+                backup.get("status") != "passed",
+                "a declaration is never reported as an observed backup",
+            )
+            _expect(
+                backup.get("acceptedRisk") is not True and backup.get("blocking") is False,
+                f"the declaration is not a risk and no longer blocks (got {backup!r})",
+            )
+            _expect(
+                str(backup.get("evidence") or "").startswith("declared:"),
+                f"the checklist evidence quotes the declaration (got {backup.get('evidence')!r})",
             )
 
         if response.status != 200:
@@ -1719,7 +1894,12 @@ class Harness:
         non_green = [
             str(item.get("id"))
             for item in required
-            if item.get("status") != "passed" and item.get("acceptedRisk") is not True
+            if item.get("status") != "passed"
+            and not (
+                item.get("id") == "backup_policy_declared"
+                and item.get("status") == "declared"
+            )
+            and item.get("acceptedRisk") is not True
         ]
         _expect(not non_green, f"every required checklist item is green (non-green: {non_green})")
         worker = items.get("worker_ready") or {}
@@ -1730,6 +1910,12 @@ class Harness:
         )
         ai = items.get("ai_explicit") or {}
         _expect(ai.get("status") == "passed", f"ai_explicit is green (got {ai.get('status')!r})")
+        backup_item = items.get("backup_policy_declared") or {}
+        if self.mode == "dev":
+            _expect(
+                backup_item.get("required") is False,
+                "a development installation does not require a backup policy",
+            )
         smtp = items.get("smtp") or {}
         _expect(smtp.get("status") == "postponed", "the postponed notification stays postponed")
         postponed = [identifier for identifier, item in items.items() if item.get("status") == "postponed"]
@@ -1752,6 +1938,7 @@ class Harness:
         return {
             "state": body.get("state"),
             "agent": agent,
+            "backup": (items.get("backup_policy_declared") or {}).get("status"),
             "worker": worker.get("evidence"),
             "postponed": sorted(postponed),
             "unavailable": sorted(unavailable),
@@ -1893,6 +2080,51 @@ class Harness:
             f"{compatibility.get('installation_state')!r})",
         )
 
+        # The identity the wizard stored must survive completion and reach both
+        # the authenticated read and the public login shell.
+        anonymous = self.client.request(
+            "GET", "/api/v1/appearance/organization", timeout=15
+        )
+        _expect(
+            anonymous.status == 401,
+            f"the organization read is authenticated (got {anonymous.status})",
+        )
+        org_client = Client(f"http://127.0.0.1:{self.api_port}", self.origin)
+        login = org_client.request(
+            "POST",
+            "/api/v1/auth/login",
+            body={"username": "owner", "password": self.owner_password},
+            headers={"Origin": self.origin},
+        )
+        _expect(
+            login.status == 200,
+            f"the owner logs in after completion (got {login.status}: {login.text()[:200]})",
+        )
+        organization = org_client.request(
+            "GET", "/api/v1/appearance/organization", timeout=30
+        )
+        _expect(
+            organization.status == 200,
+            f"the organization endpoint reads (got {organization.status}: "
+            f"{organization.text()[:160]})",
+        )
+        organization_body = organization.json()
+        _expect(
+            organization_body == {"organizationName": ORGANIZATION_NAME},
+            f"the installed organization name is the wizard value (got {organization_body!r})",
+        )
+        active = org_client.request("GET", "/api/v1/appearance/active", timeout=30)
+        _expect(
+            active.status == 200,
+            f"the public appearance shell reads (got {active.status})",
+        )
+        branding = ((active.json().get("active") or {}).get("branding") or {})
+        _expect(
+            branding.get("organizationName") == ORGANIZATION_NAME,
+            f"the login shell carries the organization name "
+            f"(got {branding.get('organizationName')!r})",
+        )
+
         refused = self.setup_mutation(
             "/configuration/notifications/apply",
             {"values": {"reason": "after complete"}, "action": "postpone", "confirm": True},
@@ -1929,6 +2161,8 @@ class Harness:
             "report_digest": digest,
             "snapshot_bytes": snapshot["bytes"],
             "installation_complete": compatibility.get("installation_complete"),
+            "organizationName": organization_body.get("organizationName"),
+            "branding": branding.get("organizationName"),
             "mutation_after_complete": refused.status,
             "old_session": rejected.status,
         }
@@ -2251,6 +2485,8 @@ class Harness:
             "Installation Owner",
             "--owner-email",
             "owner@example.invalid",
+            "--organization-name",
+            ORGANIZATION_NAME,
         ]
         if save is not None:
             argv += ["--save-storage-state", str(save)]

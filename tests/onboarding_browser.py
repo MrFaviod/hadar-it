@@ -345,12 +345,23 @@ class Run:
             self.note("appearance: the only preset is already active; the section was left unchanged")
             return
         page.select_option(selector, target)
+        organization = page.locator("#setup-config-input-appearance-organizationName")
+        if organization.count() == 1:
+            organization.fill(self.options.organization_name)
+        else:
+            self.note("appearance: no organization name input was rendered")
         page.locator('[data-setup-config-preview-submit="appearance"]').click()
         page.wait_for_selector('[data-setup-config-preview="appearance"]', timeout=60000)
+        preview_text = page.locator('[data-setup-config-preview="appearance"]').inner_text()
         self.check(
-            "→" in page.locator('[data-setup-config-preview="appearance"]').inner_text(),
+            "→" in preview_text,
             "the appearance preview lists the proposed change",
         )
+        if organization.count() == 1:
+            self.check(
+                self.options.organization_name in preview_text,
+                "the appearance preview carries the organization name",
+            )
         page.locator('[data-setup-config-apply="appearance"]').click()
         page.wait_for_selector('[data-setup-config-receipt="appearance"]', timeout=120000)
         self.check(
@@ -361,6 +372,18 @@ class Run:
             page.locator('[data-setup-section="appearance"][data-setup-section-status="passed"]').count() == 1,
             "the appearance section turns green",
         )
+        if organization.count() == 1:
+            current_block = page.locator('[data-setup-config-current="appearance"]')
+            # The receipt paints first; the section re-read lands after it.
+            try:
+                expect(current_block).to_contain_text(self.options.organization_name, timeout=20000)
+            except PlaywrightTimeoutError:
+                pass
+            self.check(
+                current_block.count() == 1
+                and self.options.organization_name in current_block.inner_text(),
+                "the applied organization name reads back",
+            )
         self.shot(page, "appearance-applied")
 
     def apply_agent(self, page) -> None:
@@ -378,6 +401,19 @@ class Run:
             observed in ("passed", "aprobado"),
             f"the agent probe passes through the UI (got {observed!r})",
         )
+        record = page.locator("[data-setup-provider-record]")
+        if record.count() == 1:
+            # The receipt paints first and the section re-read lands after it,
+            # so the record line turns "true" one render behind the receipt.
+            try:
+                page.wait_for_selector('[data-setup-provider-record="true"]', timeout=20000)
+                linked = "true"
+            except PlaywrightTimeoutError:
+                linked = record.first.get_attribute("data-setup-provider-record")
+            self.check(
+                linked == "true",
+                f"the agent section links the verified provider as a record (got {linked!r})",
+            )
         self.shot(page, "agent-verified")
 
     def verify(self, page, attempts: int = 2) -> None:
@@ -399,10 +435,14 @@ class Run:
             blocked = page.locator('[data-setup-config="blocked"], [data-setup-config="verify-error"]')
             detail = " ".join(blocked.first.inner_text().split())[:600] if blocked.count() else ""
             self.note(f"verification attempt {attempt} is blocked: {detail[:300]}")
-            if page.locator('[data-setup-config-risk="operational"]').count() == 0:
-                raise Failure(f"verification is blocked and offers no decision: {detail}")
-            self.accept_backup_risk(page)
-        raise Failure("verification is still blocked after the offered risk was accepted")
+            if page.locator("[data-setup-backup-form]").count() == 1:
+                self.declare_backup_policy(page)
+                continue
+            if page.locator('[data-setup-config-risk="operational"]').count() == 1:
+                self.accept_backup_risk(page)
+                continue
+            raise Failure(f"verification is blocked and offers no decision: {detail}")
+        raise Failure("verification is still blocked after the offered decision was recorded")
 
     def postpone_notifications(self, page) -> None:
         button = page.locator('[data-setup-config-postpone="notifications"]')
@@ -418,6 +458,53 @@ class Run:
             page.locator('[data-setup-section="notifications"][data-setup-section-status="passed"]').count() == 0,
             "a postponed section is never painted as passed",
         )
+
+    def declare_backup_policy(self, page) -> None:
+        """State the production backup policy; the wizard must answer 'declared'."""
+        if page.locator("[data-setup-backup-form]").count() == 0:
+            self.note("operational: the declaration form is not rendered")
+            return
+        for field, value in (
+            ("target", "s3://e2e-backups/prod"),
+            ("schedule", "daily 02:00 UTC"),
+            ("retention", "30 days"),
+            ("responsible", "platform team"),
+        ):
+            page.locator(f"#setup-backup-{field}").fill(value)
+        page.select_option("#setup-backup-location_kind", "object_storage")
+        with page.expect_response(
+            lambda response: "/configuration/operational" in response.url
+            and response.request.method == "POST"
+        ) as preview:
+            page.locator("[data-setup-backup-preview]").click()
+        self.check(
+            preview.value.status == 200,
+            f"the declaration preview answers 200 (got {preview.value.status})",
+        )
+        try:
+            page.wait_for_selector("[data-setup-backup-diff]", timeout=30000)
+        except PlaywrightTimeoutError as exc:
+            self.shot(page, "backup-preview-missing")
+            raise Failure(
+                "the declaration preview renders no diff although the service "
+                "answered 200: the page keys on proposed.item, which the "
+                "operational preview body does not carry"
+            ) from exc
+        self.check(
+            "→" in page.locator("[data-setup-backup-diff]").inner_text(),
+            "the declaration preview lists the stated policy",
+        )
+        page.locator("[data-setup-backup-declare]").click()
+        page.wait_for_selector("[data-setup-backup-readback]", timeout=120000)
+        self.check(
+            page.locator('[data-setup-section="operational"][data-setup-section-status="declared"]').count() == 1,
+            "the operational section reads back as declared",
+        )
+        self.check(
+            page.locator('[data-setup-section="operational"][data-setup-section-status="passed"]').count() == 0,
+            "a declaration is never painted as passed",
+        )
+        self.shot(page, "backup-declared")
 
     def accept_backup_risk(self, page) -> None:
         risk = page.locator('[data-setup-config-risk="operational"]')
@@ -465,6 +552,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--owner-username", default="owner")
     parser.add_argument("--owner-display-name", default="Installation Owner")
     parser.add_argument("--owner-email", default="owner@example.invalid")
+    parser.add_argument("--organization-name", default="E2E Installation")
     options = parser.parse_args(argv)
     if options.phase == "finish" and not options.storage_state:
         parser.error("--storage-state is required for phase finish")
