@@ -527,12 +527,21 @@ class Harness:
                 [
                     "events {}",
                     "http {",
+                    # The edge is restarted together with the stack, so the
+                    # frontend may be down (or get a new address) when nginx
+                    # starts. A literal proxy_pass resolves the name once at
+                    # boot and makes nginx exit with "host not found in
+                    # upstream"; the Docker resolver per request keeps the edge
+                    # up and picks the restarted frontend up within 10s.
+                    "  resolver 127.0.0.11 valid=10s ipv6=off;",
+                    "  resolver_timeout 5s;",
                     "  server {",
                     "    listen 8443 ssl;",
                     "    ssl_certificate /etc/tls/cert.pem;",
                     "    ssl_certificate_key /etc/tls/key.pem;",
                     "    location / {",
-                    "      proxy_pass http://frontend:8080;",
+                    "      set $frontend_upstream http://frontend:8080;",
+                    "      proxy_pass $frontend_upstream$request_uri;",
                     "      proxy_http_version 1.1;",
                     "      proxy_set_header Host $host;",
                     "      proxy_set_header X-Forwarded-Proto https;",
