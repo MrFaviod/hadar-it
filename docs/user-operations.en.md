@@ -12,7 +12,7 @@ The product is three different Git repositories, not a monorepo and not submodul
 
 | Path | Content | Verification |
 |---|---|---|
-| `asset/` (root) | Coordination documentation, `compose.yaml`, product version | `git status --short --branch` |
+| root | Coordination documentation, `compose.yaml`, product version | `git status --short --branch` |
 | `frontend/` | Interface, tests and help in Spanish | `git -C frontend status --short --branch` |
 | `backend/` | API, persistence, worker and identity CLI | `git -C backend status --short --branch` |
 
@@ -20,7 +20,7 @@ Review each repository where you are going to work before editing and before con
 
 ### Product identity: Hadar IT
 
-**Hadar IT** is the temporary official name, with the tagline "Bring your own department." The name the interface shows is a separate setting, under **Configuración → Apariencia** (`#/configuracion/apariencia`), in the field **Nombre visible de la aplicación** (`appName` of the active appearance): the shell and the document title take it from there. "Asset Manager" is only the label the interface inherited, not the product name. Do not rename packages, identifiers, storage paths or the database to change the presentation. See [phase10-appearance.md](backend/appearance.md).
+**Hadar IT** is the product name, with the tagline "Bring your own department." The name the interface shows is a separate setting, under **Settings → Appearance** (`#/configuracion/apariencia`), in the field **Visible application name** (`appName` of the active appearance): the shell and the document title take it from there. "Asset Manager" is only the label the interface inherited, not the product name. Do not rename packages, identifiers, storage paths or the database to change the presentation. See [appearance.md](backend/appearance.md).
 
 ## Installation
 
@@ -82,7 +82,7 @@ To rehearse a recovery: choose a maintenance window, coordinate writes and uploa
 
 SDK v2 separates declarative modules from executable packages. Executable code uses a restricted runner and isolated frontend rendering. A human owner must approve the exact package digest, requested permissions, migration plan and validation result. Changed code needs new validation and approval. Disabling a module does not delete its data.
 
-SDK interface composition allows adding, hiding or replacing navigation, pages, widgets, panels and business actions through declared contributions. It is integrated in this development branch and requires a validated, approved and enabled extension; it does not imply a deployment or a publication. Login, permissions, extension recovery and system operations remain core surfaces. See [extensions-sdk.md](backend/extensions-sdk.md) and [frontend/docs/extensions-sdk.md](frontend/extensions-sdk.md).
+SDK interface composition allows adding, hiding or replacing navigation, pages, widgets, panels and business actions through declared contributions. It is part of the product and requires a validated, approved and enabled extension; it does not imply a deployment or a publication. Login, permissions, extension recovery and system operations remain core surfaces. See [extensions-sdk.md](backend/extensions-sdk.md) and [extensions-sdk.md](frontend/extensions-sdk.md).
 
 ## Superadmin operations
 

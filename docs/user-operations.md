@@ -12,7 +12,7 @@ El producto son tres repositorios Git distintos, no un monorepo ni submódulos. 
 
 | Ruta | Contenido | Verificación |
 |---|---|---|
-| `asset/` (raíz) | Documentación de coordinación, `compose.yaml`, versión de producto | `git status --short --branch` |
+| raíz | Documentación de coordinación, `compose.yaml`, versión de producto | `git status --short --branch` |
 | `frontend/` | Interfaz, pruebas y ayuda en español | `git -C frontend status --short --branch` |
 | `backend/` | API, persistencia, worker y CLI de identidad | `git -C backend status --short --branch` |
 
@@ -20,7 +20,7 @@ Revisa cada repositorio donde vas a trabajar antes de editar y antes de confirma
 
 ### Identidad del producto: Hadar IT
 
-**Hadar IT** es el nombre oficial temporal, con la bajada "Bring your own department." El nombre que muestra la interfaz es otra cosa y se configura en **Configuración → Apariencia** (`#/configuracion/apariencia`), campo **Nombre visible de la aplicación** (`appName` de la apariencia activa): el shell y el título del documento lo toman de ahí. "Asset Manager" es solo la etiqueta que la interfaz heredó, no el nombre del producto. No renombres paquetes, identificadores, rutas de almacenamiento ni la base de datos para cambiar la presentación. Ver [phase10-appearance.md](backend/appearance.md).
+**Hadar IT** es el nombre del producto, con la bajada "Bring your own department." El nombre que muestra la interfaz es otra cosa y se configura en **Configuración → Apariencia** (`#/configuracion/apariencia`), campo **Nombre visible de la aplicación** (`appName` de la apariencia activa): el shell y el título del documento lo toman de ahí. "Asset Manager" es solo la etiqueta que la interfaz heredó, no el nombre del producto. No renombres paquetes, identificadores, rutas de almacenamiento ni la base de datos para cambiar la presentación. Ver [appearance.md](backend/appearance.md).
 
 ## Instalación
 
@@ -82,7 +82,7 @@ Para ensayar una recuperación: elige una ventana de mantenimiento, coordina esc
 
 El SDK v2 distingue módulos declarativos de paquetes ejecutables. El código ejecutable usa un proceso restringido y renderizado aislado. Una persona responsable debe aprobar el digest exacto, los permisos, el plan de migración y la validación. Los cambios de código requieren nueva validación y aprobación. Deshabilitar un módulo no elimina sus datos.
 
-La composición de interfaz por SDK permite agregar, ocultar o reemplazar navegación, páginas, widgets, paneles y acciones de negocio mediante contribuciones declaradas. Está integrada en esta rama de desarrollo y requiere una extensión validada, aprobada y habilitada; no implica un despliegue ni una publicación. Login, permisos, recuperación de extensiones y operaciones de sistema siguen siendo superficies del core. Ver [extensions-sdk.md](backend/extensions-sdk.md) y [frontend/docs/extensions-sdk.md](frontend/extensions-sdk.md).
+La composición de interfaz por SDK permite agregar, ocultar o reemplazar navegación, páginas, widgets, paneles y acciones de negocio mediante contribuciones declaradas. Forma parte del producto y requiere una extensión validada, aprobada y habilitada; no implica un despliegue ni una publicación. Login, permisos, recuperación de extensiones y operaciones de sistema siguen siendo superficies del core. Ver [extensions-sdk.md](backend/extensions-sdk.md) y [extensions-sdk.md](frontend/extensions-sdk.md).
 
 ## Operaciones de Superadmin
 

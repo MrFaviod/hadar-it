@@ -32,7 +32,7 @@ The root ignores the two component directories. They are independent repositorie
 
 | Layer | Implementation |
 |---|---|
-| Browser | React 19 + TypeScript + Vite 6 host; locally vendored Vue 3 renders domain views. No runtime OpenDesign dependency or iframe for the main application. |
+| Browser | React 19 + TypeScript + Vite 8 host; locally vendored Vue 3 renders domain views. No runtime OpenDesign dependency or iframe for the main application. |
 | API and services | Python 3.14+, FastAPI, Pydantic v2, SQLAlchemy 2 and Alembic |
 | Identity | Argon2id passwords, server-side sessions, Casbin policies, audit and personal API keys |
 | Background work | Huey; SQLite queue by default, separately configurable Redis or PostgreSQL queue |
@@ -110,4 +110,4 @@ Component setup and test prerequisites: [frontend development](frontend/developm
 
 **Hadar IT** is the current product name, with the tagline **Bring your own department.** The visible installation name is configurable in **Settings → Appearance**; changing that name does not require renaming packages, database objects or storage paths. Preserve installation-specific names.
 
-The root project is distributed under [MIT](../LICENSE). Backend packaging still declares `LicenseRef-Proprietary`; that metadata discrepancy must be resolved before a release. Documentation does not change licensing metadata.
+The root project and the backend package are both distributed under [MIT](../LICENSE). Documentation does not change licensing metadata.

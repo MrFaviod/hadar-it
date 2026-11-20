@@ -88,4 +88,4 @@ Production creates no default account. Its `initialize` phase precedes `bootstra
 - **Extensions:** [SDK](extensions-sdk.md), [current SDK v2 host and restricted runner](extensions-host.md). Executable Python is not loaded into the API or worker; missing sandbox support fails closed. A human Superadmin approves the exact module digest.
 - **Deployment:** [preparation](deployment-preparation.md), [modes](release-modes.md), [development](dev-mode.md), [demo](demo-public.md), [backup/restore](ops-backup-restore.md).
 
-Earlier phase documents are historical context. Current code and the dedicated contracts take precedence when those pages disagree. The root is MIT-licensed; backend package metadata still says `LicenseRef-Proprietary`. That inconsistency needs reconciliation before a release; this documentation change does not alter licenses.
+Earlier phase documents are historical context. Current code and the dedicated contracts take precedence when those pages disagree. The root project and the backend package are both MIT-licensed; this documentation change does not alter licenses.

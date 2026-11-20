@@ -12,11 +12,11 @@ the preset only stores its default.
 ```json
 {
   "id": "generic",
-  "name": "Asset Manager",
+  "name": "Hadar IT",
   "version": 1,
-  "description": "Identidad genérica del producto",
+  "description": "Identidad original · Siempre disponible",
   "branding": {
-    "appName": "Asset Manager",
+    "appName": "Hadar IT",
     "organizationName": "Operaciones TI",
     "logo": "/api/v1/appearance/assets/logo",
     "logoDark": "",
