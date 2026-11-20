@@ -126,3 +126,4 @@ Release modes, preparation and backups, the demo, system operations and working 
 - [Backend foundation](backend/foundation.md)
 - [Backend development](backend/development.md)
 - [Frontend development](frontend/development.md)
+- [Setup and onboarding contract](onboarding-contract.md)

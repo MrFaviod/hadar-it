@@ -63,7 +63,7 @@ business installation.
 |---|---|
 | Inventory and workflows | [Inventory](inventory.md), [workflows](workflows.md) |
 | Dashboard and monitoring | [Workspace](workspace.md), [infrastructure and monitoring](infrastructure-monitoring.md) |
-| Search | [Global search](../frontend/development.md) |
+| Search | [Global search](../backend/search.md) |
 | Reports and workspace | [Reports](reports.md), [workspace](workspace.md) |
 | Language and help | [Internationalization](i18n.md), [integrated help](user-help.md) |
 | Agents | [Agent integrations](agent-integrations.md), [multimodal UI](ai-multimodal.md) |
