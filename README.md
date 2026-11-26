@@ -1,5 +1,7 @@
 ![Hadar IT — Bring your own department.](assets/banner.svg)
 
+This is a personal project, built to cover my own day-to-day IT needs. Suggestions are welcome.
+
 **Hadar IT** is a self-hosted, agent-first IT service management tool for small and mid-size companies with a small IT team. Inventory, people, sites, maintenance, monitoring and reports live in one place, and the built-in assistant, MCP clients and the REST API work on that same data under the same server-enforced permissions. The extension SDK lets each department shape it to the way it works.
 
 **[Install](INSTALL.md)** · [Feature tour](docs/features.md) · [Technical guide](docs/technical-guide.md) · [All documentation](docs/README.md)
