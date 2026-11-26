@@ -6,9 +6,7 @@ From an empty folder to a running Hadar IT, in one guide. You do not need to vis
 
 ## Before you start
 
-You need **Git**, **Bash**, **curl**, and **Docker with a recent Compose plugin** supporting `!override` (Compose 2.24.4 or later). Docker must be running and your account must be allowed to use it. You do **not** need Python, Node.js, PostgreSQL or an AI provider on the host.
-
-The repositories are currently **private**. Your GitHub account needs access to all three, and Git must already be authenticated through your normal credential manager or GitHub CLI. Never paste a token into a clone URL.
+You need **Git**, **Bash**, **curl**, and **Docker with a recent Compose plugin** supporting `!override` (Compose 2.24.4 or later). Docker must be running and your account must be allowed to use it. You do **not** need Python, Node.js, PostgreSQL or an AI provider on the host. The three repositories are public.
 
 On SELinux hosts, ask the host operator for an unused MCS level for this installation, such as `s0:c500,c501`. The value is an allocation, not a universal default; keep it for later commands. Compose requires it even on hosts without SELinux.
 
@@ -133,7 +131,7 @@ docker compose --env-file .env run --rm -e ITSM_BOOTSTRAP_PASSWORD backend \
 
 | Symptom | What to check |
 |---|---|
-| Clone returns “Repository not found” | GitHub authentication and access to all three private repositories. |
+| Clone returns “Repository not found” | Check the repository URL and that Git can reach GitHub. |
 | Compose rejects `!override` | Upgrade the Compose plugin; do not remove the storage override. |
 | A required variable is missing | Complete the required values in `.env` and keep `--env-file .env` in the command. |
 | Port is already allocated | Change the ports and matching frontend URLs in `.env` consistently. |

@@ -31,7 +31,7 @@ Some of this needs more than the base install. AI conversation, live monitoring 
 
 ## Try it
 
-The [installation guide](INSTALL.md) takes you from an empty folder to a running instance with Docker Compose and fictional data, in four steps. You do not need Python, Node.js or a database on the host. The repositories are private for now, so your GitHub account needs access to all three.
+The [installation guide](INSTALL.md) takes you from an empty folder to a running instance with Docker Compose and fictional data, in four steps. You do not need Python, Node.js or a database on the host.
 
 Then follow the [feature tour](docs/features.md): ten short stops through the application, with screenshots.
 
